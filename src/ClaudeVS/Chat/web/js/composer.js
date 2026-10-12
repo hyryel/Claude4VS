@@ -2,7 +2,7 @@
 import { state } from './state.js';
 import {
   el, append, scroll, short,
-  inputEl, selectionEl, slashEl, sessionsEl, attachmentsEl, fileInputEl, activityEl,
+  inputEl, selectionEl, slashEl, sessionsEl, attachmentsEl, fileInputEl, activityEl, agentsEl,
   modeEl, modelEl, effortEl, cwdEl, autoFormatEl, autoAnalyzeEl,
   attachEl, sendEl, compactEl, newChatEl, historyEl, closeSessionsEl,
 } from './dom.js';
@@ -10,7 +10,7 @@ import { post } from './host.js';
 import { setChosenModel, setChosenEffort } from './toolbar.js';
 import { ToHost } from './protocol.js';
 import { icon, withIcon } from './icons.js';
-import { addOwnMessage, interrupt, clear } from './conversation.js';
+import { addOwnMessage, interrupt, clear, scrollToAgent } from './conversation.js';
 
 // ---------------------------------------------------------------- saisie
 
@@ -228,6 +228,7 @@ export function wireComposer() {
   sendEl.onclick = send;
   // Toute la pastille « Claude travaille… | ■ Arrêter » est cliquable, pas seulement le bouton.
   activityEl.onclick = interrupt;
+  agentsEl.onclick = scrollToAgent;
   modeEl.onchange = e => post({ type: ToHost.setMode, mode: e.target.value });
   modelEl.onchange = e => { setChosenModel(e.target.value); post({ type: ToHost.setModel, model: e.target.value }); };
   effortEl.onchange = e => post({ type: ToHost.setEffort, effort: e.target.value });

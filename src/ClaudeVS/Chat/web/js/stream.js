@@ -2,7 +2,7 @@
 import { state, messages, streamed, tools, subTools } from './state.js';
 import { el, append, scroll } from './dom.js';
 import { renderMd, renderDiagrams, addCopyButtons } from './markdown.js';
-import { toolElement, toolSummary, setOpen } from './tools.js';
+import { toolElement, toolSummary } from './tools.js';
 import { toolLabel } from './conversation.js';
 import { setActualModel } from './toolbar.js';
 
@@ -87,24 +87,24 @@ export function onStreamEvent(m) {
 
 // ---------------------------------------------------------------- sous-agents
 
-// Activité d'un sous-agent : liste de ses outils sous l'outil Task/Agent parent
+// Activité d'un sous-agent : liste de ses outils dans la boîte « Actions » de la carte d'agent (créée par agentDetails).
+// Repliée, la boîte ne montre que la dernière ligne (CSS) ; dépliée, la liste défile et suit la dernière action.
 function onSubagentAssistant(m) {
-  const parent = tools.get(m.parent_tool_use_id);
-  if (!parent) return;
-  let list = parent.querySelector('.sub');
-  if (!list) {
-    list = el('div', 'sub');
-    parent.querySelector('.tool-body').prepend(list);
-    setOpen(parent, true);
-  }
-  for (const c of m.message.content || []) {
-    if (c.type !== 'tool_use' || subTools.has(c.id)) continue;
+  const actions = tools.get(m.parent_tool_use_id)?.querySelector('.agent-actions');
+  if (!actions) return;
+  const list = actions.querySelector('.sub');
+  const added = (m.message.content || []).filter(c => c.type === 'tool_use' && !subTools.has(c.id));
+  if (!added.length) return;
+  for (const c of added) {
     const line = list.appendChild(el('div', 'sub-line running'));
     line.appendChild(el('span', 'name', toolLabel(c.name)));
     line.appendChild(el('span', 'summary', ' ' + toolSummary(c.name, c.input)));
     subTools.set(c.id, line);
-    parent.querySelector('.state').textContent = list.children.length + ' outils ';
   }
+  actions.hidden = false;
+  actions.querySelector('.agent-actions-head').textContent = `Actions (${list.children.length})`;
+  actions.closest('.tool').querySelector('.state').textContent = list.children.length + ' outils ';
+  if (actions.classList.contains('open')) list.scrollTop = list.scrollHeight;
   scroll();
 }
 
@@ -114,6 +114,14 @@ export function onSubagentResults(content) {
     if (!line) continue;
     line.classList.remove('running');
     line.classList.add(c.is_error ? 'error' : 'ok');
+    // Refus ou échec : la raison telle que l'a écrite celui qui a décidé (utilisateur, règle, hook de permission…),
+    // première ligne utile sur la ligne d'action, texte complet en infobulle
+    if (!c.is_error) continue;
+    const text = Array.isArray(c.content) ? c.content.map(x => x.type === 'text' ? x.text : '').join('\n') : c.content || '';
+    const first = text.split('\n').map(s => s.trim()).find(Boolean);
+    if (!first) continue;
+    line.appendChild(el('span', 'sub-error', ' — ' + first.replace(/^(Error|Erreur)\s*:\s*/i, '')));
+    line.title = text;
   }
 }
 
