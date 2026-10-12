@@ -59,7 +59,11 @@ namespace ClaudeVS.Chat
             if (line.HasValue && view != null) view.SetCaretPos(Math.Max(0, line.Value - 1), 0);
         }
 
-        public JObject? FormatDocument(string path) => _package.Tools?.Editor.FormatDocument(path, closeIfNotOpen: true);
+        public JObject? FormatDocument(string path)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return _package.Tools?.Editor.FormatDocument(path, closeIfNotOpen: true);
+        }
 
         public async Task<(bool? accepted, string? text)> ShowDiffAsync(string path, string proposed, string tab)
         {
@@ -68,8 +72,16 @@ namespace ClaudeVS.Chat
             return result;
         }
 
-        public void CloseDiff(string tab) => DiffManager.GetInstance(_package).Close(tab);
+        public void CloseDiff(string tab)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            DiffManager.GetInstance(_package).Close(tab);
+        }
 
-        public string? CurrentDiffText(string tab) => DiffManager.GetInstance(_package).CurrentText(tab);
+        public string? CurrentDiffText(string tab)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return DiffManager.GetInstance(_package).CurrentText(tab);
+        }
     }
 }

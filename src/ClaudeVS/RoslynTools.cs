@@ -94,6 +94,7 @@ namespace ClaudeVS
             var solution = ws.CurrentSolution;
             // Le chemin se résout sur le thread principal (solution VS), avant de passer en arrière-plan
             var file = (string)args["file"];
+            await _package.JoinableTaskFactory.SwitchToMainThreadAsync(); // déjà dessus (GetWorkspaceAsync) : sans coût
             if (!string.IsNullOrEmpty(file)) args["file"] = PathResolver.Resolve(file, mustExist: true);
             await TaskScheduler.Default; // Roslyn travaille hors du thread principal
             using (var cts = CancellationTokenSource.CreateLinkedTokenSource(outer))

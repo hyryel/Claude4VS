@@ -155,7 +155,8 @@ namespace ClaudeVS
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var result = new JArray();
-            var openBefore = new HashSet<string>(Dte.Documents.Cast<Document>().Select(d => d.FullName), StringComparer.OrdinalIgnoreCase);
+            var openBefore = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (Document d in Dte.Documents) openBefore.Add(d.FullName);
             var startDoc = Dte.ActiveDocument;
             var startPath = startDoc?.FullName;
             var startLine = (startDoc?.Selection as TextSelection)?.ActivePoint.Line ?? 0;

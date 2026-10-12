@@ -159,6 +159,7 @@ namespace ClaudeVS
 
         private async Task<JObject> CallCoreAsync(string name, JObject args)
         {
+            await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
             switch (name)
             {
                 case "openDiff":
@@ -359,15 +360,15 @@ namespace ClaudeVS
 
         private async Task<IWpfTextView> GetWpfViewAsync(IVsTextView vsView)
         {
-            var componentModel = (IComponentModel)await _package.GetServiceAsync(typeof(SComponentModel));
-            return componentModel.GetService<IVsEditorAdaptersFactoryService>().GetWpfTextView(vsView);
+            var componentModel = await _package.GetServiceAsync(typeof(SComponentModel)) as IComponentModel;
+            return componentModel?.GetService<IVsEditorAdaptersFactoryService>().GetWpfTextView(vsView);
         }
 
         private async Task<(IWpfTextView view, string path)> GetActiveViewAsync()
         {
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
-            var textManager = (IVsTextManager)await _package.GetServiceAsync(typeof(SVsTextManager));
-            if (textManager.GetActiveView(1, null, out var vsView) != VSConstants.S_OK || vsView == null)
+            var textManager = await _package.GetServiceAsync(typeof(SVsTextManager)) as IVsTextManager;
+            if (textManager == null || textManager.GetActiveView(1, null, out var vsView) != VSConstants.S_OK || vsView == null)
                 return (null, null);
             var view = await GetWpfViewAsync(vsView);
             if (view == null || !view.TextBuffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument doc))

@@ -41,8 +41,7 @@ namespace ClaudeVS
             {
                 // Un projet « .csproj » ouvert seul : Solution.FullName est vide, on se rabat sur le projet
                 var solutionPath = dte.Solution.FullName;
-                target = !string.IsNullOrEmpty(solutionPath) ? solutionPath
-                    : dte.Solution.Projects.Cast<EnvDTE.Project>().FirstOrDefault(p => !string.IsNullOrEmpty(p.FullName))?.FullName;
+                target = !string.IsNullOrEmpty(solutionPath) ? solutionPath : PathResolver.FirstProjectPath(dte);
             }
             else target = PathResolver.Resolve(target, mustExist: false); // peut être un dossier
 

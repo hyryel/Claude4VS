@@ -58,9 +58,9 @@ namespace ClaudeVS.Chat
             _stdin = new StreamWriter(_process.StandardInput.BaseStream, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
             _log.Info($"claude démarré (pid {_process.Id}) : {psi.Arguments}");
 
-            Task.Factory.StartNew(WriteLoop, TaskCreationOptions.LongRunning);
+            _ = Task.Factory.StartNew(WriteLoop, System.Threading.CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             _stderrTask = Task.Run(ReadStderrAsync);
-            Task.Run(ReadStdoutAsync);
+            _ = Task.Run(ReadStdoutAsync); // les erreurs sont journalisées dans la boucle de lecture
         }
 
         private readonly StringBuilder _stderrTail = new StringBuilder();
@@ -90,7 +90,9 @@ namespace ClaudeVS.Chat
 
             try { _process.WaitForExit(); } catch (Exception ex) { if (!_disposed) _log.Info("WaitForExit : " + ex.Message); }
             // stderr se ferme avec le processus, mais sa lecture peut avoir un temps de retard : on l'attend pour un message complet
+#pragma warning disable VSTHRD003 // tâche de lecture lancée par ce même objet sur le pool : pas de thread UI en jeu
             try { await Task.WhenAny(_stderrTask, Task.Delay(2000)); } catch { }
+#pragma warning restore VSTHRD003
             int code = -1;
             try { code = _process.ExitCode; } catch { }
             Exited?.Invoke(code, StderrTail);
@@ -181,7 +183,7 @@ namespace ClaudeVS.Chat
             try { _stdin.Dispose(); } catch { }
             var process = _process;
             var job = _job;
-            Task.Run(() =>
+            _ = Task.Run(() =>
             {
                 try
                 {

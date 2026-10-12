@@ -122,6 +122,7 @@ namespace ClaudeVS.Chat
                     response = new JObject { ["behavior"] = "allow", ["updatedInput"] = EditPreview.BuildUpdatedInput(tool, input, path, original, proposed, text) };
                 else
                     response = new JObject { ["behavior"] = "deny", ["message"] = "L'utilisateur a refusé la modification dans le diff de Visual Studio." };
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(); // ShowDiffAsync s'y termine déjà : sans coût
                 Resolve(requestId, response);
             }, "diff");
         }

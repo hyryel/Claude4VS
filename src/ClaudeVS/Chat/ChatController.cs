@@ -47,18 +47,19 @@ namespace ClaudeVS.Chat
         private readonly EventHandler _onSolutionClosed;
         private bool _cwdSwitchPending;           // solution changée pendant un tour : bascule de dossier à la fin du tour
 
-        public ChatController(ClaudeVSPackage package, Action<JObject> post)
-            : this(package, new VsIdeContext(package), post)
+        /// <param name="ide">null = Visual Studio (VsIdeContext) ; autre implémentation pour les tests.</param>
+        public ChatController(ClaudeVSPackage package, Action<JObject> post, IIdeContext ide = null)
         {
-        }
-
-        internal ChatController(ClaudeVSPackage package, IIdeContext ide, Action<JObject> post)
-        {
+            ThreadHelper.ThrowIfNotOnUIThread();
             _package = package;
-            _ide = ide;
+            _ide = ide ?? new VsIdeContext(package);
             _post = post;
-            _permissions = new PermissionBroker(ide, post, (id, response) => TrySend(() => _claude?.SendControlResponse(id, response)), RunOnUi);
-            _controls = new ControlRequests(SendControlRequest, post, ide.Log);
+            _permissions = new PermissionBroker(_ide, post, (id, response) =>
+            {
+                ThreadHelper.ThrowIfNotOnUIThread();
+                return TrySend(() => _claude?.SendControlResponse(id, response));
+            }, RunOnUi);
+            _controls = new ControlRequests(SendControlRequest, post, _ide.Log);
             SelectionTracker.Changed += OnSelectionChanged;
             DebugMonitor.BreakOnException += OnExceptionBreak;
             _onSolutionOpened = (s, e) => OnSolutionOpened();
@@ -80,6 +81,7 @@ namespace ClaudeVS.Chat
         {
             RunOnUi(() =>
             {
+                ThreadHelper.ThrowIfNotOnUIThread();
                 PostSettings();
                 PreloadCli();
                 if (!NeedsCwdSwitch()) return;
@@ -277,6 +279,7 @@ namespace ClaudeVS.Chat
         /// <summary>Valeur inattendue venant de l'interface : refusée, et les réglages réels sont renvoyés pour resynchroniser les sélecteurs.</summary>
         private void RejectSetting(string what, string value)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             var shown = value.Length > 60 ? value.Substring(0, 60) + "…" : value;
             PostError($"Valeur de {what} refusée : « {shown} ».");
             PostSettings();
@@ -352,6 +355,7 @@ namespace ClaudeVS.Chat
         /// <summary>Autocomplétion des @-mentions ; seq permet à l'interface d'ignorer les réponses périmées.</summary>
         private void SearchFiles(string query, int seq)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             var root = EffectiveCwd();
             RunOnUi(async () =>
             {
@@ -363,6 +367,7 @@ namespace ClaudeVS.Chat
         /// <summary>Insère une @-mention dans la zone de saisie (commande « Envoyer la sélection à Claude »).</summary>
         public void InsertMention(string path, int? lineStart, int? lineEnd)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             var root = EffectiveCwd();
             var rel = path.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase) ? path.Substring(root.Length + 1) : path;
             var mention = "@" + rel.Replace('\\', '/');
@@ -528,6 +533,7 @@ namespace ClaudeVS.Chat
         {
             RunOnUi(() =>
             {
+                ThreadHelper.ThrowIfNotOnUIThread();
                 if (source != _claude) return; // message d'un processus déjà remplacé
 
                 var type = (string)msg["type"];
@@ -674,6 +680,7 @@ namespace ClaudeVS.Chat
         {
             RunOnUi(() =>
             {
+                ThreadHelper.ThrowIfNotOnUIThread();
                 if (source != _claude) return;
                 var wasBusy = _busy;
                 StopProcess(); // libère Process/StreamWriter, ferme les diffs, expire les permissions
@@ -712,20 +719,25 @@ namespace ClaudeVS.Chat
         /// <param name="sticky">Vrai : pas de fermeture automatique (l'annonce demande une action de l'utilisateur).</param>
         private void PostBanner(string text, bool sticky = false) => _post(new JObject { ["type"] = FromHost.Banner, ["text"] = text, ["sticky"] = sticky });
 
-        private void PostSettings() => _post(new JObject
+        private void PostSettings()
         {
-            ["type"] = FromHost.Settings,
-            ["model"] = _model ?? "",
-            ["effort"] = _effort ?? "",
-            ["mode"] = _permissionMode,
-            ["attachSelection"] = _attachSelection,
-            ["autoFormat"] = _autoFormat,
-            ["autoAnalyze"] = _autoAnalyzeExceptions,
-            ["cwd"] = EffectiveCwd(),
-        });
+            ThreadHelper.ThrowIfNotOnUIThread();
+            _post(new JObject
+            {
+                ["type"] = FromHost.Settings,
+                ["model"] = _model ?? "",
+                ["effort"] = _effort ?? "",
+                ["mode"] = _permissionMode,
+                ["attachSelection"] = _attachSelection,
+                ["autoFormat"] = _autoFormat,
+                ["autoAnalyze"] = _autoAnalyzeExceptions,
+                ["cwd"] = EffectiveCwd(),
+            });
+        }
 
         public void Dispose()
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             SelectionTracker.Changed -= OnSelectionChanged;
             DebugMonitor.BreakOnException -= OnExceptionBreak;
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenSolution -= _onSolutionOpened;
