@@ -86,6 +86,10 @@ export function onRewindPreview(m) {
   const bubble = messagesEl.querySelector(`.msg.user[data-uuid="${CSS.escape(m.uuid || '')}"]`);
   const card = el('div', 'perm rewind-card');
   state.rewindCard = card;
+  // Mémorisé pour la confirmation affichée en fin de conversation (rewindDone ne renvoie pas toujours la liste)
+  // Texte saisi seulement : les nœuds texte directs de la bulle (ni la puce 📎 de contexte, ni le bouton ↶)
+  const own = bubble ? [...bubble.childNodes].filter(n => n.nodeType === Node.TEXT_NODE).map(n => n.textContent).join('') : '';
+  card.rewindInfo = { files: m.files || [], message: own.trim() };
   if (!m.ok || !m.canRewind) {
     card.appendChild(el('div', 'title', 'Retour arrière impossible'));
     card.appendChild(el('div', null, m.error || 'Aucun point de sauvegarde pour ce message (fichiers non modifiés, ou conversation reprise sans sauvegardes).'));
@@ -114,6 +118,19 @@ export function onRewindDone(m) {
   card.classList.add('resolved');
   card.appendChild(el('div', 'outcome', m.ok ? '✓ Fichiers restaurés' : '✗ Échec : ' + (m.error || 'inconnu')));
   state.rewindCard = null;
+  // Confirmation explicite en fin de conversation : la carte, elle, est plus haut dans le fil, contre le message visé
+  const info = card.rewindInfo || { files: [], message: '' };
+  const files = (m.files?.length ? m.files : info.files).map(rel);
+  const quoted = info.message.length > 80 ? info.message.slice(0, 80) + '…' : info.message;
+  const done = el('div', m.ok ? 'rewind-done' : 'error');
+  if (m.ok) {
+    done.appendChild(el('div', 'title', `↶ Retour arrière effectué : ${files.length} fichier(s) restauré(s)`));
+    if (files.length) { const ul = done.appendChild(el('ul')); for (const f of files) ul.appendChild(el('li', null, f)); }
+    if (quoted) done.appendChild(el('div', 'outcome', `État rétabli : celui d'avant le message « ${quoted} ». La conversation est conservée.`));
+  } else done.textContent = '↶ Retour arrière échoué : ' + (m.error || 'erreur inconnue');
+  append(done);
+  // L'utilisateur a remonté le fil pour cliquer sur ↶ : le défilement automatique est suspendu, on l'amène à la confirmation
+  done.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 // ---------------------------------------------------------------- flux du CLI

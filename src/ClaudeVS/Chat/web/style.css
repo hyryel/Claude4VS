@@ -210,6 +210,12 @@ a.file:hover { text-decoration: underline; }
 }
 .msg.user:hover .rewind { opacity: .8; }
 .rewind-card { margin: 6px 0 10px; }
+/* Confirmation de retour arrière, en fin de conversation */
+.rewind-done { margin: 8px 0 12px; padding: 8px 10px; border: 1px solid var(--ok); border-radius: 4px; background: color-mix(in srgb, var(--ok) 12%, transparent); }
+/* Vert mélangé à la couleur du texte : contraste ≥ 4,5 en thème clair comme en sombre (vert pur : 3,96 en clair) */
+.rewind-done .title { font-weight: 600; color: color-mix(in srgb, var(--ok) 70%, var(--fg)); }
+.rewind-done ul { margin: 4px 0; padding-left: 18px; font-family: Consolas, monospace; font-size: 12px; }
+.rewind-done .outcome { color: color-mix(in srgb, var(--fg) 80%, transparent); font-size: 12px; }
 .rewind-card ul { margin: 4px 0; padding-left: 18px; font-family: Consolas, monospace; font-size: 12px; }
 .input-row { display: flex; gap: 6px; align-items: flex-end; }
 #input {
