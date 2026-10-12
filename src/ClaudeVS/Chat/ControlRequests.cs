@@ -69,6 +69,27 @@ namespace ClaudeVS.Chat
             });
         }
 
+        /// <summary>
+        /// Consommation du forfait (données de /usage) : plafonds de session (5 h), de semaine et par modèle, coût de la
+        /// session. Requête expérimentale du CLI : un refus (version trop ancienne) laisse simplement la ligne masquée.
+        /// skip_behaviors évite le parcours des transcriptions des 7 derniers jours, inutile ici.
+        /// </summary>
+        public void RequestUsage()
+        {
+            Send(new JObject { ["subtype"] = "get_usage", ["skip_behaviors"] = true }, r =>
+            {
+                var usage = r["response"] as JObject;
+                if ((string?)r["subtype"] != "success" || usage == null) return;
+                _post(new JObject
+                {
+                    ["type"] = FromHost.Usage,
+                    // Clé API, Bedrock, Vertex : pas de plafonds, seul le coût est affiché
+                    ["limits"] = (bool?)usage["rate_limits_available"] == true ? usage["rate_limits"] as JObject : null,
+                    ["cost"] = usage["session"]?["total_cost_usd"],
+                });
+            });
+        }
+
         /// <summary>Modèle et effort réellement appliqués par le CLI (get_settings.applied), pour renseigner les entrées « par défaut ».</summary>
         public void RequestApplied()
         {
