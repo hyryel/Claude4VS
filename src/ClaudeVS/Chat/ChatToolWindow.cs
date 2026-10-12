@@ -32,7 +32,11 @@ namespace ClaudeVS.Chat
 
         internal ChatController Controller => (Content as ChatControl)?.Controller;
 
-        internal void FocusInput() => (Content as ChatControl)?.FocusInput();
+        internal void FocusInput()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            (Content as ChatControl)?.FocusInput();
+        }
 
         protected override void Dispose(bool disposing)
         {
@@ -312,6 +316,7 @@ namespace ClaudeVS.Chat
 
         public void Dispose()
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             if (_disposed) return;
             _disposed = true;
             VSColorTheme.ThemeChanged -= _onThemeChanged;

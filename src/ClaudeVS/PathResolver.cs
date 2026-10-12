@@ -38,10 +38,19 @@ namespace ClaudeVS
                 && solution.GetSolutionInfo(out var dir, out _, out _) == VSConstants.S_OK
                 && !string.IsNullOrEmpty(dir))
                 return dir;
-            var dte = (DTE2)Package.GetGlobalService(typeof(SDTE));
-            var project = dte?.Solution?.Projects.Cast<Project>().FirstOrDefault(p => !string.IsNullOrEmpty(p.FullName))?.FullName;
+            var project = FirstProjectPath((DTE2)Package.GetGlobalService(typeof(SDTE)));
             if (!string.IsNullOrEmpty(project)) return Path.GetDirectoryName(project);
             throw new InvalidOperationException("No solution or project is open");
+        }
+
+        /// <summary>Chemin du premier projet chargé (un « .csproj » ouvert seul n'a pas de solution enregistrée), sinon null.</summary>
+        public static string? FirstProjectPath(DTE2? dte)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (dte?.Solution == null) return null;
+            foreach (Project p in dte.Solution.Projects)
+                if (!string.IsNullOrEmpty(p.FullName)) return p.FullName;
+            return null;
         }
     }
 }

@@ -218,12 +218,16 @@ namespace ClaudeVS
                 else all.Add(p);
             }
             foreach (Project p in Dte.Solution.Projects) Collect(p);
-            var found = all.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)
-                                             || string.Equals(p.UniqueName, name, StringComparison.OrdinalIgnoreCase)
-                                             || string.Equals(Path.GetFileNameWithoutExtension(p.FullName), name, StringComparison.OrdinalIgnoreCase));
-            if (found == null)
-                throw new InvalidOperationException($"Project not found: {name}. Projects: {string.Join(", ", all.Select(p => p.Name))}");
-            return found;
+            var names = new List<string>();
+            foreach (var p in all)
+            {
+                if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(p.UniqueName, name, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(Path.GetFileNameWithoutExtension(p.FullName), name, StringComparison.OrdinalIgnoreCase))
+                    return p;
+                names.Add(p.Name);
+            }
+            throw new InvalidOperationException($"Project not found: {name}. Projects: {string.Join(", ", names)}");
         }
 
         // ---- Exécution ---------------------------------------------------------------------

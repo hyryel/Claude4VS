@@ -51,6 +51,7 @@ namespace ClaudeVS.Chat
         /// <summary>Remplissage du contexte : catégories renvoyées par le CLI, résumées en « utilisé / total ».</summary>
         public void RequestContextUsage()
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             Send(new JObject { ["subtype"] = "get_context_usage" }, r =>
             {
                 var categories = r["response"]?["categories"] as JArray;
@@ -76,6 +77,7 @@ namespace ClaudeVS.Chat
         /// </summary>
         public void RequestUsage()
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             Send(new JObject { ["subtype"] = "get_usage", ["skip_behaviors"] = true }, r =>
             {
                 var usage = r["response"] as JObject;
@@ -93,6 +95,7 @@ namespace ClaudeVS.Chat
         /// <summary>Modèle et effort réellement appliqués par le CLI (get_settings.applied), pour renseigner les entrées « par défaut ».</summary>
         public void RequestApplied()
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             Send(new JObject { ["subtype"] = "get_settings" }, r =>
             {
                 var applied = r["response"]?["applied"] as JObject;
@@ -120,6 +123,7 @@ namespace ClaudeVS.Chat
         /// <summary>Retour arrière des fichiers à l'état précédant un message utilisateur (dry run = aperçu).</summary>
         public void Rewind(string uuid, bool dryRun)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             if (string.IsNullOrEmpty(uuid)) return;
             var request = new JObject { ["subtype"] = "rewind_files", ["user_message_id"] = uuid };
             if (dryRun) request["dry_run"] = true;

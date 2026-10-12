@@ -90,7 +90,12 @@ namespace ClaudeVS
             var right = Path.Combine(dir, fileName);
             File.WriteAllText(right, newContents ?? "");
 
-            var diffService = (IVsDifferenceService)await _package.GetServiceAsync(typeof(SVsDifferenceService));
+            var diffService = await _package.GetServiceAsync(typeof(SVsDifferenceService)) as IVsDifferenceService;
+            if (diffService == null)
+            {
+                TryDelete(dir);
+                throw new InvalidOperationException("Visual Studio comparison service unavailable");
+            }
             var options = leftIsTemp ? (uint)__VSDIFFSERVICEOPTIONS.VSDIFFOPT_LeftFileIsTemporary : 0u;
             var frame = diffService.OpenComparisonWindow2(left, right,
                 $"Claude ↔ {fileName}", tabName,
@@ -108,7 +113,9 @@ namespace ClaudeVS
             pending.Attach();
             frame.Show();
 
+#pragma warning disable VSTHRD003 // complétée par les boutons du diff (thread UI), qu'on attend sans le bloquer
             var accepted = await pending.Decision.Task;
+#pragma warning restore VSTHRD003
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
             var finalText = accepted == true ? ReadBuffer(right) : null;
             pending.Dispose();
