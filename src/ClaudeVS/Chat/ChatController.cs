@@ -620,7 +620,8 @@ namespace ClaudeVS.Chat
                 StopProcess(); // libère Process/StreamWriter, ferme les diffs, expire les permissions
                 PostStatus("idle");
                 if (code != 0)
-                    PostError($"claude s'est arrêté (code {code}).{(string.IsNullOrWhiteSpace(stderr) ? "" : "\n" + stderr.Trim())}");
+                    PostError($"Claude s'est arrêté de façon inattendue (code {code}). Envoyez un message pour le relancer."
+                            + (string.IsNullOrWhiteSpace(stderr) ? "" : "\n" + stderr.Trim()));
                 else if (wasBusy)
                     PostNotice("claude s'est arrêté avant de terminer sa réponse. Envoyez un nouveau message pour le relancer.");
             }, "exit");
