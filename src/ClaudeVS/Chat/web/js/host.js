@@ -44,7 +44,7 @@ const handlers = {
   [FromHost.cli]: m => onCli(m.msg),
   [FromHost.status]: m => setStatus(m.state),
   [FromHost.error]: m => append(el('div', 'error', m.text)),
-  [FromHost.permissionResolved]: m => onPermissionResolved(m.requestId, m.behavior),
+  [FromHost.permissionResolved]: m => onPermissionResolved(m.requestId, m.behavior, m.reason),
   // Nouvelle conversation, reprise ou bascule de solution : l'annonce précédente n'a plus d'objet. Lors d'une bascule,
   // le C# poste « cleared » AVANT le nouveau bandeau, qui s'affiche donc bien ensuite.
   [FromHost.cleared]: () => { clear(); hideBanner(); },

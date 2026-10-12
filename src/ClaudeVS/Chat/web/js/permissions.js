@@ -158,11 +158,20 @@ export function questionCard(card, input, respond) {
   return card;
 }
 
-// behavior : 'allow' | 'deny' | 'cancelled' (demande abandonnée par le C# : processus arrêté, tour terminé, control_cancel_request)
-export function onPermissionResolved(id, behavior) {
+// Demande abandonnée sans réponse : 'stopped' = processus arrêté par l'extension, 'cli' = retirée par le CLI
+// (interruption, ou décidée par un autre moyen dont on ne sait rien : formulation prudente).
+function cancelledLabels(reason) {
+  if (reason === 'stopped') return ['Abandonnée', 'Abandonnée (session arrêtée)'];
+  if (state.interrupted) return ['Interrompue', 'Interrompue'];
+  return ['Retirée', 'Retirée par Claude Code'];
+}
+
+// behavior : 'allow' | 'deny' | 'cancelled' (demande abandonnée, reason : 'stopped' | 'cli')
+export function onPermissionResolved(id, behavior, reason) {
   const card = perms.get(id);
   if (!card) return;
-  const label = behavior === 'allow' ? 'Autorisé' : behavior === 'cancelled' ? 'Expiré' : 'Refusé';
+  const [cancelledTag, cancelledOutcome] = cancelledLabels(reason);
+  const label = behavior === 'allow' ? 'Autorisé' : behavior === 'cancelled' ? cancelledTag : 'Refusé';
   // Demande d'autorisation d'un outil : une fois décidée, elle n'apporte plus rien (les paramètres sont dans la carte
   // de l'outil). On la retire et la décision reste tracée par une étiquette dans l'en-tête de l'outil.
   // Les cartes de question et de plan, elles, portent les réponses de l'utilisateur : elles restent.
@@ -179,6 +188,6 @@ export function onPermissionResolved(id, behavior) {
   }
   card.classList.add('resolved');
   card.querySelectorAll('button, input').forEach(x => { x.disabled = true; });
-  card.appendChild(el('div', 'outcome', behavior === 'allow' ? '✓ Autorisé' : behavior === 'cancelled' ? 'Demande expirée' : '✗ Refusé'));
+  card.appendChild(el('div', 'outcome', behavior === 'allow' ? '✓ Autorisé' : behavior === 'cancelled' ? cancelledOutcome : '✗ Refusé'));
   perms.delete(id);
 }

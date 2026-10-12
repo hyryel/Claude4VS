@@ -566,7 +566,7 @@ namespace ClaudeVS.Chat
                 {
                     // Le CLI retire une demande (tour interrompu…) : la carte et le diff n'ont plus d'objet
                     var id = (string)msg["request_id"];
-                    if (id != null) _permissions.Cancel(id);
+                    if (id != null) _permissions.Cancel(id, "cli");
                 }
                 else if (type == "control_response")
                 {
