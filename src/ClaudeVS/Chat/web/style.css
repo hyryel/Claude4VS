@@ -53,6 +53,10 @@ button.icon { padding: 2px 7px; background: transparent; border-color: transpare
 button.icon:hover { border-color: var(--input-border); }
 /* Icônes dessinées en SVG : traits calés sur les pixels, indépendants des polices (le « ＋ » pleine chasse était déformé) */
 svg.glyph { display: block; fill: currentColor; shape-rendering: crispEdges; }
+/* Seule dans un bouton : centrée, même quand le bouton s'étire (colonne envoyer / joindre) */
+button > svg.glyph { margin: auto; }
+/* Devant un texte (puces, titres de cartes, contexte d'une bulle) */
+svg.glyph.inline { display: inline-block; vertical-align: -1px; margin: 0 4px 0 0; }
 /* Même hauteur pour les boutons de la barre, qu'ils contiennent un emoji ou une icône SVG */
 #toolbar button.icon { display: inline-flex; align-items: center; justify-content: center; height: 26px; }
 
@@ -262,7 +266,7 @@ a.file:hover { text-decoration: underline; }
 
 /* ---- Retour arrière ---- */
 .msg.user .rewind {
-  position: absolute; top: 4px; right: 4px; padding: 0 6px; font-size: 12px; opacity: 0;
+  position: absolute; top: 4px; right: 4px; padding: 2px 5px; opacity: 0;
 }
 .msg.user:hover .rewind { opacity: .8; }
 .rewind-card { margin: 6px 0 10px; }
@@ -280,7 +284,7 @@ a.file:hover { text-decoration: underline; }
   padding: 6px 8px; outline: none;
 }
 #input:focus { border-color: var(--accent); }
-#send { height: 32px; }
+#send { height: 32px; padding: 0 9px; }
 .input-buttons { display: flex; flex-direction: column; gap: 4px; }
 
 #attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
@@ -288,8 +292,7 @@ a.file:hover { text-decoration: underline; }
 .thumb { position: relative; }
 .thumb img { height: 56px; max-width: 120px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); display: block; }
 .thumb .remove {
-  position: absolute; top: -6px; right: -6px; padding: 0 5px; font-size: 10px; line-height: 16px;
-  border-radius: 50%;
+  position: absolute; top: -6px; right: -6px; padding: 3px; border-radius: 50%;
 }
 .msg-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 4px; }
 .msg-images img { max-height: 160px; max-width: 100%; border-radius: 4px; border: 1px solid var(--border); }

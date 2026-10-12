@@ -10,6 +10,7 @@ import { onStreamEvent, onAssistant, onSubagentResults } from './stream.js';
 import { onToolResult } from './tools.js';
 import { permissionCard } from './permissions.js';
 import { setModels } from './toolbar.js';
+import { icon, withIcon } from './icons.js';
 
 export function setStatus(st) {
   const wasBusy = state.busy;
@@ -37,7 +38,7 @@ export function toolLabel(name) { return name.replace(/^mcp__/, ''); }
 
 export function addUserMessage(text, contextLabel, imgs, uuid) {
   const m = el('div', 'msg user');
-  if (contextLabel) m.appendChild(el('span', 'ctx', '📎 ' + contextLabel));
+  if (contextLabel) m.appendChild(withIcon(el('span', 'ctx'), 'clip', contextLabel));
   if (imgs?.length) {
     const row = m.appendChild(el('div', 'msg-images'));
     for (const i of imgs) { const im = row.appendChild(el('img')); im.src = i.url; im.alt = 'Image jointe'; }
@@ -63,7 +64,8 @@ export function addOwnMessage(text, contextLabel, imgs) {
 function setUserUuid(bubble, uuid) {
   bubble.dataset.uuid = uuid;
   if (bubble.querySelector('.rewind')) return;
-  const b = bubble.appendChild(el('button', 'rewind icon', '↶'));
+  const b = bubble.appendChild(el('button', 'rewind icon'));
+  b.appendChild(icon('rewind', 11));
   b.title = 'Remettre les fichiers dans leur état d\'avant ce message';
   b.setAttribute('aria-label', b.title);
   b.onclick = e => { e.stopPropagation(); post({ type: ToHost.rewind, uuid, dryRun: true }); };
@@ -130,10 +132,10 @@ export function onRewindDone(m) {
   const quoted = info.message.length > 80 ? info.message.slice(0, 80) + '…' : info.message;
   const done = el('div', m.ok ? 'rewind-done' : 'error');
   if (m.ok) {
-    done.appendChild(el('div', 'title', `↶ Retour arrière effectué : ${files.length} fichier(s) restauré(s)`));
+    done.appendChild(withIcon(el('div', 'title'), 'rewind', `Retour arrière effectué : ${files.length} fichier(s) restauré(s)`));
     if (files.length) { const ul = done.appendChild(el('ul')); for (const f of files) ul.appendChild(el('li', null, f)); }
     if (quoted) done.appendChild(el('div', 'outcome', `État rétabli : celui d'avant le message « ${quoted} ». La conversation est conservée.`));
-  } else done.textContent = '↶ Retour arrière échoué : ' + (m.error || 'erreur inconnue');
+  } else withIcon(done, 'rewind', 'Retour arrière échoué : ' + (m.error || 'erreur inconnue'));
   append(done);
   // L'utilisateur a remonté le fil pour cliquer sur ↶ : le défilement automatique est suspendu, on l'amène à la confirmation
   done.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -249,22 +251,27 @@ export function onContext(m) {
     (m.details || []).map(d => `${d.name} : ${k(d.tokens)}`).join('\n');
 }
 
+// Bulle « Analyse de l'exception » : l'icône précède le texte, qui reste seul nœud texte (lu par le retour arrière)
+function analysisMessage() {
+  addOwnMessage('Analyse de l\'exception').prepend(icon('bolt', null, true));
+}
+
 // Le débogueur de VS s'est arrêté sur une exception en dehors d'un appel d'outil
 export function onDebugEvent(m) {
   const s = m.state || {}, ex = s.exception;
   // Première trame avec un fichier source : la trame de tête est souvent dans le framework
   const loc = (s.callStack || []).find(f => f.file) || s.location;
   const card = el('div', 'perm event');
-  card.appendChild(el('div', 'title', '⚡ Le débogueur s\'est arrêté sur une exception'));
+  card.appendChild(withIcon(el('div', 'title'), 'bolt', 'Le débogueur s\'est arrêté sur une exception'));
   const detail = card.appendChild(el('div', 'detail'));
   detail.textContent = (ex ? `${ex.type}\n${ex.value}\n` : '') + (loc ? `${rel(loc.file || '')}:${loc.line ?? '?'}  ${loc.function || ''}` : '');
   if (m.auto) {
     card.appendChild(el('div', 'outcome', 'Analyse demandée à Claude.'));
-    addOwnMessage('⚡ Analyse de l\'exception');
+    analysisMessage();
   } else {
     const actions = card.appendChild(el('div', 'actions'));
     const b = actions.appendChild(el('button', 'primary', 'Analyser avec Claude'));
-    b.onclick = () => { b.disabled = true; addOwnMessage('⚡ Analyse de l\'exception'); post({ type: ToHost.analyzeException }); };
+    b.onclick = () => { b.disabled = true; analysisMessage(); post({ type: ToHost.analyzeException }); };
   }
   append(card);
   if (m.auto) state.stick = true;

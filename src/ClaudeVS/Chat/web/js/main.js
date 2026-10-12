@@ -7,7 +7,9 @@ import { messagesEl, inputEl, nearBottom } from './dom.js';
 import { setupMarkdown } from './markdown.js';
 import { post, listen } from './host.js';
 import { wireComposer } from './composer.js';
+import { fillIcons } from './icons.js';
 
+fillIcons();
 setupMarkdown();
 messagesEl.addEventListener('scroll', () => { state.stick = nearBottom(); });
 listen();
