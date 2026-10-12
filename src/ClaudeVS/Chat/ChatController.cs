@@ -581,17 +581,18 @@ namespace ClaudeVS.Chat
                     if (!_busy) PostStatus("ready");
                     _controls.RequestContextUsage();
                 }
-                else if (type == "stream_event" && !_busy)
+                else if (type == "stream_event" && !_busy && (msg["parent_tool_use_id"]?.Type ?? JTokenType.Null) == JTokenType.Null)
                 {
-                    // Tour démarré par un message mis en file (ex. consigne après un refus)
+                    // Tour démarré par un message mis en file (ex. consigne après un refus). Le flux d'un sous-agent en
+                    // arrière-plan, qui continue après la fin du tour principal, n'en démarre pas un.
                     _busy = true;
                     PostStatus("busy");
                 }
                 else if (type == "result")
                 {
                     _busy = false;
-                    // Les permissions encore ouvertes ne recevront plus de réponse du CLI
-                    _permissions.ClearAll();
+                    // Les permissions encore ouvertes restent valables : un agent en arrière-plan continue après la fin du
+                    // tour et attend sa réponse. Le CLI retire lui-même une demande abandonnée (control_cancel_request).
                     _editToolUses.Clear();
                     PostStatus("ready");
                     // Bascule de dossier reportée : planifiée après ce traitement, pour que le « result » soit d'abord affiché

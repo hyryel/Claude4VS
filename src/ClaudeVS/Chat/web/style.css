@@ -316,6 +316,39 @@ a.file:hover { text-decoration: underline; }
 .sub-line.running::after { content: " …"; }
 .sub-line.ok::after { content: " ✓"; color: var(--ok); }
 .sub-line.error::after { content: " ✗"; color: var(--err); }
+/* Raison d'un refus ou d'un échec (hook, règle, utilisateur) : la ligne reste d'une ligne, texte complet en infobulle */
+.sub-line .sub-error { color: var(--err); }
+/* Carte de sous-agent : titre = description (pastille animée tant qu'il tourne), « Règles » et actions repliables */
+.tool.agent > .tool-head .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tool.agent > .tool-head .summary { flex: 1 0 auto; max-width: 40%; }
+.tool.agent.running > .tool-head .name::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; vertical-align: 1px;
+  background: var(--claude); margin-right: 6px; animation: pulse 1s infinite ease-in-out;
+}
+.agent-rules, .agent-actions, .agent-result { margin-top: 6px; }
+.agent-rules > summary, .agent-result > summary, .agent-actions-head { cursor: pointer; color: var(--muted); width: fit-content; }
+.agent-rules > summary:hover, .agent-result > summary:hover, .agent-actions-head:hover { color: var(--fg); }
+.agent-result > .md { max-height: 300px; overflow: auto; font-size: 13px; }
+/* Demande de permission d'un sous-agent : nom de l'agent au-dessus du titre */
+.perm-agent { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.agent-actions-head::before { content: "▸ "; }
+.agent-actions.open > .agent-actions-head::before { content: "▾ "; }
+.agent-actions-head:focus-visible { outline: 1px solid var(--accent); }
+.agent-actions .sub { margin-top: 2px; }
+/* Repliée : une seule ligne, « Actions (N) » suivi de la dernière action (celle en cours, ou la plus récente), quel que
+   soit le nombre d'actions ; dépliée : liste complète sous l'en-tête, bornée, qui défile */
+.agent-actions:not(.open) { display: flex; gap: 8px; align-items: baseline; }
+.agent-actions[hidden] { display: none; }
+.agent-actions:not(.open) > .agent-actions-head { flex: none; }
+.agent-actions:not(.open) .sub { margin: 0; padding-left: 0; border-left: none; min-width: 0; flex: 1; }
+.agent-actions:not(.open) .sub-line:not(:last-child) { display: none; }
+.agent-actions.open .sub { max-height: 180px; overflow-y: auto; }
+#agents { display: inline-flex; align-items: center; padding: 1px 8px; font-size: 12px; }
+#agents[hidden] { display: none; }
+#agents::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--claude);
+  margin-right: 6px; animation: pulse 1s infinite ease-in-out;
+}
 .context-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; font-size: 11px; color: var(--muted); }
 #cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip { font-size: 11px; padding: 0 8px; border-radius: 10px; white-space: nowrap; }

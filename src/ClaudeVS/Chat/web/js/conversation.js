@@ -2,12 +2,12 @@
 import { state, messages, streamed, tools, perms, subTools } from './state.js';
 import {
   el, append, clickable, rel, showRenderError,
-  messagesEl, statusEl, stopEl, activityEl, welcomeEl, contextEl, sessionsEl, sessionListEl,
+  messagesEl, statusEl, stopEl, activityEl, agentsEl, welcomeEl, contextEl, sessionsEl, sessionListEl,
 } from './dom.js';
 import { post } from './host.js';
 import { ToHost } from './protocol.js';
 import { onStreamEvent, onAssistant, onSubagentResults } from './stream.js';
-import { onToolResult } from './tools.js';
+import { onToolResult, onAgentDone, stopAgents } from './tools.js';
 import { permissionCard } from './permissions.js';
 import { setModels } from './toolbar.js';
 import { icon, withIcon } from './icons.js';
@@ -24,6 +24,19 @@ export function setStatus(st) {
   statusEl.textContent = { busy: 'Claude travaille…', starting: 'Démarrage de claude…', ready: '', idle: '' }[st] ?? '';
   stopEl.hidden = !state.busy;
   activityEl.classList.toggle('busy', state.busy);
+  // Processus arrêté : ses agents, y compris ceux en arrière-plan, ne finiront jamais
+  if (st === 'idle') stopAgents();
+}
+
+// Badge « N agents en arrière-plan » : cartes d'agent pas encore terminées. Indépendant du tour : un agent lancé en
+// arrière-plan continue après le « result » du tour qui l'a lancé.
+export function updateAgents() {
+  const n = messagesEl.querySelectorAll('.tool.agent.running').length;
+  agentsEl.hidden = !n;
+  agentsEl.textContent = n === 1 ? '1 agent en arrière-plan' : `${n} agents en arrière-plan`;
+}
+export function scrollToAgent() {
+  messagesEl.querySelector('.tool.agent.running')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 export function interrupt() {
@@ -143,6 +156,20 @@ export function onRewindDone(m) {
 
 // ---------------------------------------------------------------- flux du CLI
 
+// Fin d'un agent lancé en arrière-plan : le CLI l'annonce au modèle par un message utilisateur
+// <task-notification> (tool-use-id de l'appel Agent, status, result = réponse de l'agent, échappée en XML).
+// Renvoie vrai si le message en était un.
+function onTaskNotification(content) {
+  const text = typeof content === 'string' ? content
+    : Array.isArray(content) ? content.find(c => c.type === 'text')?.text : null;
+  if (!text?.startsWith('<task-notification>')) return false;
+  const tag = name => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(text)?.[1];
+  const id = tag('tool-use-id');
+  const result = tag('result')?.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  if (id) onAgentDone(id, tag('status') !== 'completed', result?.trim());
+  return true;
+}
+
 // Types du protocole stream-json du CLI (pas les nôtres : voir protocol.js pour ceux de l'extension)
 const cliHandlers = {
   stream_event: m => onStreamEvent(m),
@@ -154,6 +181,7 @@ const cliHandlers = {
       for (const c of content) if (c.type === 'tool_result') onToolResult(c);
       return;
     }
+    if (onTaskNotification(content)) return;
     return onUserReplay(m);
   },
   control_request: m => {
@@ -169,7 +197,8 @@ const cliHandlers = {
   system: m => {
     if (m.subtype === 'init') {
       if (m.slash_commands && !state.commands.length) state.commands = m.slash_commands.map(name => ({ name, description: '' }));
-    } else if (m.subtype === 'compact_boundary') append(el('div', 'divider', '— contexte compacté —'));
+    } else if (m.subtype === 'task_notification' && m.tool_use_id) onAgentDone(m.tool_use_id, m.status !== 'completed');
+    else if (m.subtype === 'compact_boundary') append(el('div', 'divider', '— contexte compacté —'));
     else if (m.subtype === 'status') {
       if (m.status === 'compacting') { statusEl.className = 'busy'; statusEl.textContent = 'Compactage du contexte…'; }
       else if (m.status == null) setStatus(state.busy ? 'busy' : 'ready'); // fin du compactage : retour à l'état réel du tour
@@ -204,6 +233,7 @@ export function renderHistory(list, last) {
   for (const m of list) {
     if (m.type === 'user') {
       const content = m.message?.content;
+      if (onTaskNotification(content)) continue;
       if (typeof content === 'string') {
         if (content.startsWith('[Request interrupted')) interruptedDivider();
         else if (!content.startsWith('<')) addUserMessage(content, null, null, m.uuid);
@@ -226,7 +256,10 @@ export function renderHistory(list, last) {
       else if (text.length || imgs.length) addUserMessage(text.join('\n'), ctx, imgs, m.uuid);
     } else if (m.type === 'assistant') onAssistant(m);
   }
-  if (last) append(el('div', 'divider', '— conversation reprise —'));
+  if (last) {
+    stopAgents(); // agents de l'ancien processus restés sans notification de fin
+    append(el('div', 'divider', '— conversation reprise —'));
+  }
 }
 
 export function clear() {
@@ -234,6 +267,7 @@ export function clear() {
   messages.clear(); streamed.clear(); tools.clear(); perms.clear(); subTools.clear();
   state.currentAssistant = null; state.currentMessageId = null; state.rewindCard = null; state.interrupted = false;
   contextEl.hidden = true;
+  updateAgents();
 }
 
 // ---------------------------------------------------------------- jauge de contexte, débogueur, sessions

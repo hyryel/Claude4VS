@@ -1,5 +1,5 @@
 // Demandes de permission du CLI : cartes d'autorisation, de plan et de question.
-import { state, tools, perms } from './state.js';
+import { state, tools, perms, subTools } from './state.js';
 import { el, append, scroll, modeEl, short } from './dom.js';
 import { post } from './host.js';
 import { ToHost } from './protocol.js';
@@ -8,11 +8,17 @@ import { toolSummary, toolDetails } from './tools.js';
 import { addOwnMessage } from './conversation.js';
 import { setMode } from './composer.js';
 
-// La carte se place juste sous l'outil concerné (sinon en fin de fil)
+// La carte se place juste sous l'outil concerné (sinon en fin de fil). Outil d'un sous-agent : sous la carte de
+// l'agent, avec son nom, pour savoir qui demande quoi (un agent en arrière-plan demande après la fin du tour).
 export function placeCard(card, toolUseId) {
-  const tool = tools.get(toolUseId);
+  const agent = subTools.get(toolUseId)?.closest('.tool.agent');
+  const tool = agent || tools.get(toolUseId);
   if (!tool) return append(card);
-  tool.after(card);
+  if (agent) card.prepend(el('div', 'perm-agent', 'Agent « ' + agent.querySelector('.tool-head .name').textContent + ' »'));
+  // Plusieurs demandes du même agent : dans l'ordre d'arrivée, à la suite des précédentes
+  let anchor = tool;
+  while (anchor.nextElementSibling?.classList.contains('perm') && anchor.nextElementSibling.dataset.toolUseId) anchor = anchor.nextElementSibling;
+  anchor.after(card);
   scroll();
   return card;
 }
@@ -160,10 +166,14 @@ export function onPermissionResolved(id, behavior) {
   // Demande d'autorisation d'un outil : une fois décidée, elle n'apporte plus rien (les paramètres sont dans la carte
   // de l'outil). On la retire et la décision reste tracée par une étiquette dans l'en-tête de l'outil.
   // Les cartes de question et de plan, elles, portent les réponses de l'utilisateur : elles restent.
-  const tool = card.dataset.kind === 'tool' && tools.get(card.dataset.toolUseId);
-  if (tool) {
+  const toolUseId = card.dataset.toolUseId;
+  const tool = card.dataset.kind === 'tool' && tools.get(toolUseId);
+  const subLine = card.dataset.kind === 'tool' && subTools.get(toolUseId);
+  if (tool || subLine) {
     card.remove();
-    tool.querySelector('.tool-head .state').before(el('span', 'perm-tag ' + behavior, label));
+    const tag = el('span', 'perm-tag ' + behavior, label);
+    if (tool) tool.querySelector('.tool-head .state').before(tag);
+    else subLine.querySelector('.name').after(' ', tag);
     perms.delete(id);
     return;
   }
