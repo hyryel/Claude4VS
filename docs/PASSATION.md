@@ -5,7 +5,7 @@ Note de reprise pour une nouvelle session. Le détail des revues est dans [REVUE
 ## 1. État du dépôt
 
 - **`main`** : contient la revue et toutes ses corrections (jusqu'au commit `ffedbf3`).
-- **`refonte/structure`** : refonte structurelle (4 vagues) + corrections issues des tests manuels. Compile sans erreur ni avertissement, 113 tests au vert. **Pas encore fusionnée dans `main`** : à faire une fois les tests restants passés.
+- **`refonte/structure`** : refonte structurelle (4 vagues) + corrections issues des tests manuels. Compile sans erreur ni avertissement, 113 tests au vert. Fusionnée dans `main` le 12 octobre 2026.
 
 ## 2. Refonte structurelle (vagues 1 à 4)
 
@@ -37,14 +37,9 @@ Coût des sous-agents : ≈ 611 000 jetons. Reporté : SUG-08 (remplacement de F
 
 Autres ajustements : contraste des textes secondaires (gris 70 %), icône « + » en SVG, carte de permission résorbée en étiquette dans l'outil, consigne système « ne pas recopier les résultats d'outils ».
 
-### Tests restants
+### Tests 13 à 16
 
-- **13. Retouche d'un diff** sur un fichier vide : accepter un Edit après l'avoir modifié dans l'onglet de diff → les retouches doivent être appliquées.
-- **14. Fichier verrouillé** : demande d'Edit sur un fichier ouvert en exclusif → la carte s'affiche quand même, notice « diff indisponible ».
-- **15. Grosse image collée** : l'interface reste réactive pendant l'envoi.
-- **16. `debugStart` pendant une compilation** : nécessite un petit projet console.
-
-Puis : fusion de `refonte/structure` dans `main`.
+13 (retouche d'un diff : correction, l'acceptation depuis la carte du chat conserve les retouches), 14 (fichier verrouillé), 15 (grosse image), 16 (`debugStart` pendant une compilation) : tous passés. `refonte/structure` est fusionnée dans `main` (non poussée). Alertes « diff indisponible » et « Claude s'est arrêté » désormais en bandeau orange.
 
 ## 4. Mode opératoire des tests
 

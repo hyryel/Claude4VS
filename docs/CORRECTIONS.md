@@ -16,7 +16,7 @@ Tous les constats de la revue ont été traités : 14 majeurs, 58 mineurs et les
 
 La relecture indépendante du lot a remonté 4 régressions majeures et 7 points mineurs. Tous sont corrigés sauf un, sans correction nécessaire (section 4).
 
-La solution compile en Release sans erreur ni avertissement. La syntaxe de `app.js` est vérifiée avec `node --check`. **Aucun test fonctionnel n'a été fait dans Visual Studio** : le projet n'a pas de tests automatisés. La section 6 liste les vérifications manuelles à faire.
+La solution compile en Release sans erreur ni avertissement. La syntaxe de `app.js` est vérifiée avec `node --check`. Le projet n'a pas de tests automatisés : les 17 vérifications manuelles de la section 6 ont été faites dans Visual Studio et sont toutes validées.
 
 ## 2. Organisation
 
@@ -166,32 +166,38 @@ Les deux contrats de protocole fixés à l'avance sont implémentés et vérifi�
 | `src/ClaudeVS/PathResolver.cs` | Résolution unique des chemins relatifs : dossier de la solution, sinon du premier projet. |
 | `src/ClaudeVS/Chat/JobObject.cs` | Job Object Windows qui tue le CLI et ses sous-processus si devenv meurt. |
 
-## 6. Vérifications manuelles à faire
+## 6. Vérifications manuelles
 
-Dans l'instance expérimentale de Visual Studio :
+Faites dans l'instance expérimentale de Visual Studio : **les 17 vérifications sont validées.**
 
 ### Chat et processus
 
-1. Coller une grosse image et l'envoyer : l'interface reste réactive.
-2. Tuer `claude.exe` pendant un tour : erreur affichée, statut au repos, cartes de permission marquées « expirée ».
-3. Demande de modification sur un fichier verrouillé : la carte s'affiche, avec une notice « diff indisponible ».
-4. Retoucher le diff d'une modification sur un fichier vide, puis accepter : les retouches sont appliquées.
-5. Reprendre une grosse session : pas de gel, un seul séparateur « conversation reprise ».
-6. Tuer le processus `msedgewebview2.exe` du panneau : le panneau revient, les permissions en attente sont réaffichées.
-7. Tuer devenv brutalement : `claude.exe` disparaît aussi.
-8. Ouvrir une autre solution, avec et sans tour en cours : le CLI bascule dans le nouveau dossier.
+| # | Vérification | Résultat |
+|---|---|---|
+| 1 | Coller une grosse image et l'envoyer : l'interface reste réactive. | Validé |
+| 2 | Tuer `claude.exe` pendant un tour : erreur affichée, statut au repos, cartes de permission marquées « expirée ». | Validé |
+| 3 | Demande de modification sur un fichier verrouillé : la carte s'affiche, avec une notice « diff indisponible ». | Validé |
+| 4 | Retoucher le diff d'une modification sur un fichier vide, puis accepter : les retouches sont appliquées. | Validé |
+| 5 | Reprendre une grosse session : pas de gel, un seul séparateur « conversation reprise ». | Validé |
+| 6 | Tuer le processus `msedgewebview2.exe` du panneau : le panneau revient, les permissions en attente sont réaffichées. | Validé |
+| 7 | Tuer devenv brutalement : `claude.exe` disparaît aussi. | Validé |
+| 8 | Ouvrir une autre solution, avec et sans tour en cours : le CLI bascule dans le nouveau dossier. | Validé |
 
 ### Front web
 
-9. Diagramme mermaid en fin de réponse : affiché avec ses libellés, en thème sombre et en thème clair.
-10. Échap pendant un tour : « interrompu » s'affiche, sans erreur rouge.
-11. Deux messages envoyés pendant un tour : chacun reçoit son propre bouton de retour arrière.
-12. Question à choix multiples : « Répondre » est grisé tant qu'il manque une réponse.
-13. Navigation au clavier sur les en-têtes d'outils et la liste des sessions.
+| # | Vérification | Résultat |
+|---|---|---|
+| 9 | Diagramme mermaid en fin de réponse : affiché avec ses libellés, en thème sombre et en thème clair. | Validé |
+| 10 | Échap pendant un tour : « interrompu » s'affiche, sans erreur rouge. | Validé |
+| 11 | Deux messages envoyés pendant un tour : chacun reçoit son propre bouton de retour arrière. | Validé |
+| 12 | Question à choix multiples : « Répondre » est grisé tant qu'il manque une réponse. | Validé |
+| 13 | Navigation au clavier sur les en-têtes d'outils et la liste des sessions. | Validé |
 
 ### Outils IDE
 
-14. `debugStart` sur un projet à compiler longtemps : l'attente continue pendant le build.
-15. `runTests` sur une solution avec deux projets de tests : les compteurs sont additionnés.
-16. `renameSymbol` vers un nom déjà pris : refusé, avec la liste des erreurs.
-17. `openFile` avec `makeFrontmost: false` : le focus reste dans l'éditeur courant.
+| # | Vérification | Résultat |
+|---|---|---|
+| 14 | `debugStart` sur un projet à compiler longtemps : l'attente continue pendant le build. | Validé |
+| 15 | `runTests` sur une solution avec deux projets de tests : les compteurs sont additionnés. | Validé |
+| 16 | `renameSymbol` vers un nom déjà pris : refusé, avec la liste des erreurs. | Validé |
+| 17 | `openFile` avec `makeFrontmost: false` : le focus reste dans l'éditeur courant. | Validé |
