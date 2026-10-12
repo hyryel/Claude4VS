@@ -1,12 +1,15 @@
 # Produit la VSIX à installer dans VS 2022 ou VS 2026 : dist\ClaudeVS-<version>.vsix.
-# Version horodatée (cible StampVsixVersion du .csproj) pour qu'elle remplace celle déjà installée.
-# La VSIX de bin\Release\net472 (build de l'IDE) garde la version 0.1.0 de l'instance expérimentale.
+# Par défaut, version horodatée (cible StampVsixVersion du .csproj) pour qu'elle remplace celle déjà installée.
+# -Release : version du manifeste (1.0.0), sans horodatage, pour l'asset d'une release GitHub.
+# Le build de l'IDE (bin\Release\net472, instance expérimentale) n'horodate pas : il garde la version du manifeste.
+param([switch]$Release)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
 if (-not $msbuild) { throw 'MSBuild introuvable.' }
 
-& $msbuild "$root\src\ClaudeVS\ClaudeVS.csproj" /restore /t:Rebuild /p:Configuration=Release /p:DeployExtension=false /v:minimal /nologo
+$stamp = if ($Release) { 'false' } else { 'true' }
+& $msbuild "$root\src\ClaudeVS\ClaudeVS.csproj" /restore /t:Rebuild /p:Configuration=Release /p:DeployExtension=false "/p:StampVsix=$stamp" /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) { throw "Échec de la compilation ($LASTEXITCODE)." }
 
 $manifest = [xml](Get-Content "$root\src\ClaudeVS\obj\Release\net472\extension.vsixmanifest")

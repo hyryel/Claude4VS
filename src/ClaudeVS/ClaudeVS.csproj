@@ -62,7 +62,7 @@
     celle déjà installée est refusée (« déjà installée »). Seulement sans déploiement (pack.ps1) : l'instance
     expérimentale ne retrouve pas une extension dont la version change à chaque build (EnableExtension échoue).
   -->
-  <Target Name="StampVsixVersion" AfterTargets="DetokenizeVsixManifestFile" Condition="'$(DeployExtension)' != 'true' and Exists('$(IntermediateVsixManifest)')">
+  <Target Name="StampVsixVersion" AfterTargets="DetokenizeVsixManifestFile" Condition="'$(DeployExtension)' != 'true' and '$(StampVsix)' != 'false' and Exists('$(IntermediateVsixManifest)')">
     <PropertyGroup>
       <VsixStampedVersion>0.1.$([System.DateTime]::Now.ToString('yyMMdd')).$([System.DateTime]::Now.ToString('HHmm'))</VsixStampedVersion>
     </PropertyGroup>

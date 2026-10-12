@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="ClaudeVS.7c1e2f0a-4b8e-4d6a-9a51-2f3c0b6d9e11" Version="0.1.0" Language="fr-FR" Publisher="nicolas.pernot" />
+    <Identity Id="ClaudeVS.7c1e2f0a-4b8e-4d6a-9a51-2f3c0b6d9e11" Version="1.0.0" Language="fr-FR" Publisher="nicolas.pernot" />
     <DisplayName>ClaudeVS</DisplayName>
     <Description>Claude Code dans Visual Studio : panneau de conversation, diff natif, sélection, diagnostics et outils de l'IDE (Roslyn, build, débogage).</Description>
   </Metadata>
