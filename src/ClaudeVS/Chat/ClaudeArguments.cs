@@ -59,6 +59,8 @@ namespace ClaudeVS.Chat
             "- Format a file with formatDocument; manage bookmarks with bookmarkList/bookmarkToggle.\n" +
             "Files changed through the IDE (renameSymbol, formatDocument) are modified on disk by Visual Studio: re-read them " +
             "before editing them with Edit. The user's current editor selection is attached to messages as context.\n" +
+            "Tool calls and their results are already shown to the user in the panel: do not reproduce raw tool output, " +
+            "summarize what matters.\n" +
             "This is a default, not a rule: when the user explicitly asks for another way (grep, manual edits, 'without the IDE " +
             "tools', dotnet CLI...), do exactly what the user asks.";
 
