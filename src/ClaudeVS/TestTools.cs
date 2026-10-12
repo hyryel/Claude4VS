@@ -7,7 +7,6 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Xml.Linq;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
@@ -60,8 +59,6 @@ namespace ClaudeVS
     /// </summary>
     internal static class TestTools
     {
-        private static readonly XNamespace Ns = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010";
-
         public static JObject Definition() => IdeTools.Tool("runTests",
             "Run the unit tests with 'dotnet test' (xUnit, NUnit, MSTest) and return the results: counts, failed tests with messages and stack traces.",
             new JObject
@@ -138,39 +135,14 @@ namespace ClaudeVS
                     return result;
                 }
 
-                long total = 0, passed = 0, failed = 0;
-                var failures = new JArray();
-                foreach (var file in trx)
-                {
-                    var doc = XDocument.Load(file);
-                    var counters = doc.Descendants(Ns + "Counters").FirstOrDefault();
-                    if (counters != null)
-                    {
-                        total += Attr(counters, "total");
-                        passed += Attr(counters, "passed");
-                        failed += Attr(counters, "failed");
-                    }
-                    foreach (var r in doc.Descendants(Ns + "UnitTestResult"))
-                    {
-                        var outcome = (string)r.Attribute("outcome");
-                        if (outcome == "Passed" || outcome == "NotExecuted") continue;
-                        var error = r.Descendants(Ns + "ErrorInfo").FirstOrDefault();
-                        var stack = (string)error?.Element(Ns + "StackTrace");
-                        failures.Add(new JObject
-                        {
-                            ["test"] = (string)r.Attribute("testName"),
-                            ["outcome"] = outcome,
-                            ["duration"] = (string)r.Attribute("duration"),
-                            ["message"] = Truncate((string)error?.Element(Ns + "Message"), 2000),
-                            ["stackTrace"] = Truncate(stack, 1500),
-                        });
-                    }
-                }
+                var summary = TrxReport.Read(trx);
+                long total = summary.Total, passed = summary.Passed, failed = summary.Failed;
+                var failures = summary.Failures;
                 result["succeeded"] = exitCode == 0 && failed == 0;
                 result["total"] = total;
                 result["passed"] = passed;
                 result["failed"] = failed;
-                result["skipped"] = Math.Max(0, total - passed - failed); // ignorés, non concluants… : tout ce qui n'est ni réussi ni échoué
+                result["skipped"] = summary.Skipped; // ignorés, non concluants… : tout ce qui n'est ni réussi ni échoué
                 result["failures"] = failures;
                 result["reports"] = trx.Length;
                 if (total == 0) result["note"] = string.IsNullOrEmpty(filter)
@@ -197,8 +169,6 @@ namespace ClaudeVS
             try { if (!p.HasExited) p.Kill(); } catch { }
         }
 
-        private static long Attr(XElement e, string name) => long.TryParse((string)e.Attribute(name), out var v) ? v : 0;
-        private static string Truncate(string s, int n) => s != null && s.Length > n ? s.Substring(0, n) + "…" : s;
         private static string Tail(string text, int lines)
         {
             var all = text.Replace("\r\n", "\n").Split('\n').Where(l => l.Trim().Length > 0).ToList();
