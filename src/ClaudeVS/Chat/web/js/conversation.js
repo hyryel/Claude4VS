@@ -75,10 +75,15 @@ function onUserReplay(m) {
   const own = blocks.find(c => (c.type === 'text' && typeof c.text === 'string' && !c.text.startsWith('<')) || c.type === 'image');
   if (!own) return;
   if (own.type === 'text' && (own.text.startsWith('This session is being continued') || own.text.startsWith('[Request interrupted'))) return;
-  // Le CLI rejoue les messages dans l'ordre d'envoi : la plus ancienne bulle encore en attente reçoit l'uuid
-  // (jamais une vieille bulle de l'historique, qui n'est pas marquée en attente)
-  const bubble = messagesEl.querySelector('.msg.user[data-pending]');
-  if (bubble && m.uuid) { delete bubble.dataset.pending; setUserUuid(bubble, m.uuid); }
+  // Le CLI rejoue les messages dans l'ordre d'envoi : les plus anciennes bulles encore en attente reçoivent l'uuid
+  // (jamais une vieille bulle de l'historique, qui n'est pas marquée en attente). Les messages envoyés pendant une
+  // réponse sont FUSIONNÉS par le CLI en un seul tour (un texte saisi par message, un seul uuid) : chacune des bulles
+  // concernées reçoit cet uuid, même point de retour arrière, puisque c'est un seul tour pour le CLI.
+  if (!m.uuid) return;
+  const typed = blocks.filter(c => c.type === 'text' && typeof c.text === 'string' && !c.text.startsWith('<')).length;
+  const count = Math.max(1, typed);
+  const pending = [...messagesEl.querySelectorAll('.msg.user[data-pending]')].slice(0, count);
+  for (const bubble of pending) { delete bubble.dataset.pending; setUserUuid(bubble, m.uuid); }
 }
 
 export function onRewindPreview(m) {
