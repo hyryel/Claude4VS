@@ -84,10 +84,17 @@ select {
 
 /* ---- Barre d'outils ---- */
 #toolbar {
-  display: flex; gap: 6px; align-items: center;
+  display: flex; gap: 6px; align-items: flex-end; flex-wrap: wrap;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
+/* Libellé au-dessus de chaque liste déroulante */
+.field { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+/* Historique et nouvelle conversation passent à la ligne ensemble, jamais l'un sans l'autre */
+#toolbar .actions { display: flex; gap: 4px; flex-shrink: 0; margin-left: auto; }
+.field > span { font-size: 10px; color: var(--muted); }
+/* Largeur ajustée à l'entrée sélectionnée, pas à la plus longue de la liste */
+.field select { max-width: 100%; field-sizing: content; }
 .spacer { flex: 1; }
 
 #sessions {

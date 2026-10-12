@@ -46,6 +46,7 @@ namespace ClaudeVS.Chat
         public const string RewindPreview = "rewindPreview";
         public const string RewindDone = "rewindDone";
         public const string Settings = "settings";
+        public const string Applied = "applied";         // modèle et effort réellement appliqués par le CLI (model, effort)
         public const string Sessions = "sessions";
         public const string Files = "files";
         public const string Theme = "theme";
