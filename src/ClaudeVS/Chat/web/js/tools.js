@@ -1,5 +1,5 @@
 // Appels d'outils : résumé, détails, élément repliable et résultat.
-import { tools } from './state.js';
+import { state, tools } from './state.js';
 import { el, clickable, scroll, rel, short, fileLink } from './dom.js';
 import { renderMd } from './markdown.js';
 import { toolLabel, updateAgents } from './conversation.js';
@@ -53,6 +53,55 @@ export function setOpen(t, open) {
   t.querySelector('.tool-head').setAttribute('aria-expanded', open);
 }
 
+// ---------------------------------------------------------------- zone « Actions » d'un tour
+
+// Les outils d'un tour et les commentaires de travail du modèle (texte et réflexion écrits avant un outil) sont
+// regroupés dans une zone repliée, en tête du tour : le fil montre la question, la zone, puis la réponse (le texte
+// écrit après le dernier outil). Repliée pendant le tour, l'en-tête montre l'action en cours ou la plus récente.
+// Les demandes de permission restent hors de la zone, juste dessous (placeCard).
+function actionsZone(container) {
+  let zone = container.querySelector(':scope > .turn-actions');
+  if (!zone) {
+    zone = el('div', state.busy ? 'turn-actions running' : 'turn-actions');
+    const head = zone.appendChild(el('div', 'turn-actions-head'));
+    head.appendChild(el('span', 'count'));
+    head.appendChild(el('span', 'fails'));
+    head.appendChild(el('span', 'last'));
+    head.setAttribute('aria-expanded', 'false');
+    clickable(head, () => openZone(zone, !zone.classList.contains('open')));
+    zone.appendChild(el('div', 'turn-actions-body'));
+    container.prepend(zone);
+  }
+  const body = zone.lastChild;
+  for (const n of [...container.children]) if (n !== zone && !n.classList.contains('perm')) body.appendChild(n);
+  return body;
+}
+
+export function openZone(zone, open) {
+  zone.classList.toggle('open', open);
+  zone.firstChild.setAttribute('aria-expanded', open);
+}
+
+// Fin du tour : l'en-tête n'affiche plus que le décompte
+export function endTurnZones() {
+  for (const z of document.querySelectorAll('.turn-actions.running')) z.classList.remove('running');
+}
+
+function refreshZone(t) {
+  const zone = t.closest('.turn-actions');
+  if (!zone) return;
+  const list = zone.querySelectorAll(':scope > .turn-actions-body > .tool');
+  const fails = zone.querySelectorAll(':scope > .turn-actions-body > .tool.error').length;
+  const head = zone.firstChild;
+  head.querySelector('.count').textContent = `Actions (${list.length})`;
+  head.querySelector('.fails').textContent = fails ? (fails === 1 ? '1 échec' : `${fails} échecs`) : '';
+  const last = list[list.length - 1], lastEl = head.querySelector('.last');
+  lastEl.replaceChildren(el('span', 'name', last.querySelector('.name').textContent), ' ' + last.querySelector('.summary').textContent);
+  lastEl.classList.toggle('running', last.classList.contains('running'));
+}
+
+// ---------------------------------------------------------------- cartes d'outils
+
 // Carte de sous-agent : titre = description de l'appel, type d'agent en résumé ; corps = « Règles » (le prompt) et
 // actions, deux boîtes repliables. Les actions repliées ne montrent que la dernière (voir onSubagentAssistant).
 function agentDetails(t, input) {
@@ -80,6 +129,7 @@ function agentDetails(t, input) {
   setOpen(t, true);
 }
 
+// container : conteneur du tour ; la carte va dans sa zone « Actions »
 export function toolElement(id, name, input, container) {
   let t = tools.get(id);
   if (!t) {
@@ -92,7 +142,7 @@ export function toolElement(id, name, input, container) {
     head.setAttribute('aria-expanded', 'false');
     clickable(head, () => setOpen(t, !t.classList.contains('open')));
     t.appendChild(el('div', 'tool-body'));
-    container.appendChild(t);
+    actionsZone(container).appendChild(t);
     tools.set(id, t);
     scroll();
     if (isAgent(name)) updateAgents();
@@ -106,6 +156,7 @@ export function toolElement(id, name, input, container) {
     }
     if (name === 'TodoWrite') setOpen(t, true);
   }
+  refreshZone(t);
   return t;
 }
 
@@ -122,6 +173,7 @@ export function onAgentDone(toolUseId, failed, result) {
     t.querySelector('.state').textContent = (count ? count + ' outils ' : '') + (failed ? '✗' : '✓');
     if (!failed) setOpen(t, false);
     updateAgents();
+    refreshZone(t);
   }
   if (result && !t.querySelector('.agent-result')) {
     const box = t.querySelector('.tool-body').appendChild(el('details', 'agent-result'));
@@ -136,6 +188,7 @@ export function stopAgents() {
     t.classList.remove('running', 'background');
     t.classList.add('error');
     t.querySelector('.state').textContent = 'arrêté';
+    refreshZone(t);
   }
   updateAgents();
 }
@@ -168,4 +221,5 @@ export function onToolResult(r) {
     const summary = first.replace(/^(Error|Erreur)\s*:\s*/i, '').replace(/\s*:\s*$/, ''); // « …applied: » annonçait la liste repliée
     t.querySelector('.tool-head').after(el('div', 'tool-error-summary', summary.length > 160 ? summary.slice(0, 160) + '…' : summary));
   }
+  refreshZone(t);
 }

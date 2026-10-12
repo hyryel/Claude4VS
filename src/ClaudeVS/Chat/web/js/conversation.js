@@ -7,7 +7,7 @@ import {
 import { post } from './host.js';
 import { ToHost } from './protocol.js';
 import { onStreamEvent, onAssistant, onSubagentResults } from './stream.js';
-import { onToolResult, onAgentDone, stopAgents } from './tools.js';
+import { onToolResult, onAgentDone, stopAgents, openZone, endTurnZones } from './tools.js';
 import { permissionCard } from './permissions.js';
 import { setModels } from './toolbar.js';
 import { icon, withIcon } from './icons.js';
@@ -15,6 +15,7 @@ import { icon, withIcon } from './icons.js';
 export function setStatus(st) {
   const wasBusy = state.busy;
   state.busy = st === 'busy';
+  if (!state.busy) endTurnZones();
   // Plus de tour en cours : l'interruption n'attend plus de « result ». Sur « ready » juste après un tour, c'est le
   // « result » (posté après le status par ChatController) qui affiche « — interrompu — » et réinitialise lui-même.
   if (st === 'idle' || (st === 'ready' && !wasBusy)) state.interrupted = false;
@@ -36,7 +37,10 @@ export function updateAgents() {
   agentsEl.textContent = n === 1 ? '1 agent en arrière-plan' : `${n} agents en arrière-plan`;
 }
 export function scrollToAgent() {
-  messagesEl.querySelector('.tool.agent.running')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  const agent = messagesEl.querySelector('.tool.agent.running');
+  const zone = agent?.closest('.turn-actions');
+  if (zone) openZone(zone, true); // repliée, la carte n'a pas de position où défiler
+  agent?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 export function interrupt() {

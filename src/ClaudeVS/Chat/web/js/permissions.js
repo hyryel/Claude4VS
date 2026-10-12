@@ -10,13 +10,14 @@ import { setMode } from './composer.js';
 
 // La carte se place juste sous l'outil concerné (sinon en fin de fil). Outil d'un sous-agent : sous la carte de
 // l'agent, avec son nom, pour savoir qui demande quoi (un agent en arrière-plan demande après la fin du tour).
+// Outil rangé dans la zone « Actions » du tour (repliée) : sous la zone, pour rester visible.
 export function placeCard(card, toolUseId) {
   const agent = subTools.get(toolUseId)?.closest('.tool.agent');
   const tool = agent || tools.get(toolUseId);
   if (!tool) return append(card);
   if (agent) card.prepend(el('div', 'perm-agent', 'Agent « ' + agent.querySelector('.tool-head .name').textContent + ' »'));
-  // Plusieurs demandes du même agent : dans l'ordre d'arrivée, à la suite des précédentes
-  let anchor = tool;
+  // Plusieurs demandes : dans l'ordre d'arrivée, à la suite des précédentes
+  let anchor = tool.closest('.turn-actions') || tool;
   while (anchor.nextElementSibling?.classList.contains('perm') && anchor.nextElementSibling.dataset.toolUseId) anchor = anchor.nextElementSibling;
   anchor.after(card);
   scroll();

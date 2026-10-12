@@ -181,7 +181,12 @@ details.thinking .content { white-space: pre-wrap; padding: 4px 0 4px 12px; }
 /* Décision de permission, résorbée dans l'en-tête de l'outil */
 .perm-tag { flex: none; font-size: 11px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--border); color: var(--muted); }
 .perm-tag.deny { color: var(--err); border-color: var(--err); }
-.tool.running .state::after { content: "…"; }
+/* Action en cours : petit cercle qui tourne à la place des points de suspension */
+.tool.running .state::after, .sub-line.running::after, .turn-actions-head .last.running::after {
+  content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 4px; vertical-align: -1px;
+  border: 1.5px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .tool.ok .state { color: var(--ok); }
 .tool.error .state { color: var(--err); }
 .tool-body { display: none; padding: 0 8px 8px; }
@@ -313,7 +318,6 @@ a.file:hover { text-decoration: underline; }
 .sub { margin: 6px 0 2px; border-left: 2px solid var(--border); padding-left: 8px; font-family: Consolas, monospace; }
 .sub-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .sub-line .name { color: var(--fg); font-weight: 600; }
-.sub-line.running::after { content: " …"; }
 .sub-line.ok::after { content: " ✓"; color: var(--ok); }
 .sub-line.error::after { content: " ✗"; color: var(--err); }
 /* Raison d'un refus ou d'un échec (hook, règle, utilisateur) : la ligne reste d'une ligne, texte complet en infobulle */
@@ -343,6 +347,22 @@ a.file:hover { text-decoration: underline; }
 .agent-actions:not(.open) .sub { margin: 0; padding-left: 0; border-left: none; min-width: 0; flex: 1; }
 .agent-actions:not(.open) .sub-line:not(:last-child) { display: none; }
 .agent-actions.open .sub { max-height: 180px; overflow-y: auto; }
+/* Zone « Actions » d'un tour : outils et commentaires de travail, repliés entre la question et la réponse. Repliée
+   pendant le tour, l'en-tête montre l'action en cours ou la plus récente */
+.turn-actions { margin: 2px 0 6px; }
+.turn-actions-head { display: flex; gap: 8px; align-items: baseline; cursor: pointer; color: var(--muted); font-size: 12px; }
+.turn-actions-head:hover { color: var(--fg); }
+.turn-actions-head:focus-visible { outline: 1px solid var(--accent); }
+.turn-actions-head .count { flex: none; }
+.turn-actions-head .count::before { content: "▸ "; }
+.turn-actions.open > .turn-actions-head .count::before { content: "▾ "; }
+.turn-actions-head .fails { flex: none; color: var(--err); }
+.turn-actions-head .fails:empty { display: none; }
+.turn-actions-head .last { display: none; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Consolas, monospace; }
+.turn-actions-head .last .name { color: var(--fg); font-weight: 600; }
+.turn-actions.running:not(.open) .last { display: block; }
+.turn-actions-body { display: none; margin-top: 2px; border-left: 2px solid var(--border); padding-left: 8px; }
+.turn-actions.open > .turn-actions-body { display: block; }
 #agents { display: inline-flex; align-items: center; padding: 1px 8px; font-size: 12px; }
 #agents[hidden] { display: none; }
 #agents::before {
