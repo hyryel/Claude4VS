@@ -47,13 +47,21 @@ namespace ClaudeVS
                 _debounce.Tick += (s, e) =>
                 {
                     _debounce.Stop();
-                    var v = _pendingView;
-                    if (v == null || v.IsClosed) return;
-                    if (!v.TextBuffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument d)) return;
-                    var sel = Describe(v, d.FilePath);
-                    if (Latest != null && JToken.DeepEquals(Latest, sel)) return;
-                    Latest = sel;
-                    Changed?.Invoke(sel);
+                    // Une exception ici remonterait au Dispatcher WPF de VS : on la journalise
+                    try
+                    {
+                        var v = _pendingView;
+                        if (v == null || v.IsClosed) return;
+                        if (!v.TextBuffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument d)) return;
+                        var sel = Describe(v, d.FilePath);
+                        if (Latest != null && JToken.DeepEquals(Latest, sel)) return;
+                        Latest = sel;
+                        Changed?.Invoke(sel);
+                    }
+                    catch (Exception ex)
+                    {
+                        ClaudeVSPackage.Instance?.Log.Error("Suivi de la sélection : " + ex.Message);
+                    }
                 };
             }
             _debounce.Stop();
@@ -72,7 +80,8 @@ namespace ClaudeVS
             {
                 ["text"] = span.GetText(),
                 ["filePath"] = path,
-                ["fileUrl"] = new Uri(path).AbsoluteUri,
+                // Document sans chemin exploitable (fenêtre temporaire, nom non-URI) : pas d'URL plutôt qu'une exception
+                ["fileUrl"] = Uri.TryCreate(path, UriKind.Absolute, out var uri) ? uri.AbsoluteUri : null,
                 ["selection"] = new JObject
                 {
                     ["start"] = Pos(span.Start),

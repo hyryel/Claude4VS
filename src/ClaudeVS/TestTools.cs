@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -37,13 +38,14 @@ namespace ClaudeVS
 
             var resultsDir = Path.Combine(Path.GetTempPath(), "ClaudeVS", "tests", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(resultsDir);
-            var args = new List<string> { "test", target, "--logger", "trx;LogFileName=results.trx", "--results-directory", resultsDir, "--nologo" };
+            // Pas de LogFileName : en solution multi-projets, chaque projet écrit son propre TRX au lieu d'écraser le même
+            var args = new List<string> { "test", target, "--logger", "trx", "--results-directory", resultsDir, "--nologo" };
             if (!string.IsNullOrEmpty(filter)) args.AddRange(new[] { "--filter", filter });
             if (noBuild) args.Add("--no-build");
 
             var psi = new ProcessStartInfo("dotnet")
             {
-                Arguments = string.Join(" ", args.Select(Quote)),
+                Arguments = CommandLine.Join(args),
                 WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(target)),
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -61,73 +63,96 @@ namespace ClaudeVS
             var output = new StringBuilder();
             var sw = Stopwatch.StartNew();
             int exitCode;
-            using (var p = new Process { StartInfo = psi })
+            try
             {
-                p.Start();
-                var stdout = p.StandardOutput.ReadToEndAsync();
-                var stderr = p.StandardError.ReadToEndAsync();
-                var finished = await Task.Run(() => p.WaitForExit(Math.Max(1, timeoutSeconds) * 1000));
-                if (!finished)
+                using (var p = new Process { StartInfo = psi })
                 {
-                    try { p.Kill(); } catch { }
-                    throw new TimeoutException($"dotnet test did not finish within {timeoutSeconds} s.");
+                    try { p.Start(); }
+                    catch (Win32Exception ex)
+                    {
+                        throw new InvalidOperationException("Could not start 'dotnet' (is the .NET SDK installed and on the PATH of Visual Studio?): " + ex.Message);
+                    }
+                    var stdout = p.StandardOutput.ReadToEndAsync();
+                    var stderr = p.StandardError.ReadToEndAsync();
+                    var finished = await Task.Run(() => p.WaitForExit(Math.Max(1, timeoutSeconds) * 1000));
+                    if (!finished)
+                    {
+                        KillTree(p, log); // Kill() seul laisserait testhost.exe (et les tests) tourner
+                        throw new TimeoutException($"dotnet test did not finish within {timeoutSeconds} s.");
+                    }
+                    output.Append(await stdout).Append(await stderr);
+                    exitCode = p.ExitCode;
                 }
-                output.Append(await stdout).Append(await stderr);
-                exitCode = p.ExitCode;
-            }
 
-            var trx = Directory.GetFiles(resultsDir, "*.trx", SearchOption.AllDirectories);
-            var result = new JObject { ["exitCode"] = exitCode, ["durationMs"] = sw.ElapsedMilliseconds };
-            if (trx.Length == 0)
-            {
-                // Pas de rapport : la compilation a échoué ou ce n'est pas un projet de tests
-                result["succeeded"] = false;
-                result["note"] = "No test report produced (build error or no test project). See output.";
-                result["output"] = Tail(output.ToString(), 60);
+                // Un TRX par projet de tests : les compteurs sont sommés et les échecs concaténés
+                var trx = Directory.GetFiles(resultsDir, "*.trx", SearchOption.AllDirectories);
+                var result = new JObject { ["exitCode"] = exitCode, ["durationMs"] = sw.ElapsedMilliseconds };
+                if (trx.Length == 0)
+                {
+                    // Pas de rapport : la compilation a échoué ou ce n'est pas un projet de tests
+                    result["succeeded"] = false;
+                    result["note"] = "No test report produced (build error or no test project). See output.";
+                    result["output"] = Tail(output.ToString(), 60);
+                    return result;
+                }
+
+                long total = 0, passed = 0, failed = 0;
+                var failures = new JArray();
+                foreach (var file in trx)
+                {
+                    var doc = XDocument.Load(file);
+                    var counters = doc.Descendants(Ns + "Counters").FirstOrDefault();
+                    if (counters != null)
+                    {
+                        total += Attr(counters, "total");
+                        passed += Attr(counters, "passed");
+                        failed += Attr(counters, "failed");
+                    }
+                    foreach (var r in doc.Descendants(Ns + "UnitTestResult"))
+                    {
+                        var outcome = (string)r.Attribute("outcome");
+                        if (outcome == "Passed" || outcome == "NotExecuted") continue;
+                        var error = r.Descendants(Ns + "ErrorInfo").FirstOrDefault();
+                        var stack = (string)error?.Element(Ns + "StackTrace");
+                        failures.Add(new JObject
+                        {
+                            ["test"] = (string)r.Attribute("testName"),
+                            ["outcome"] = outcome,
+                            ["duration"] = (string)r.Attribute("duration"),
+                            ["message"] = Truncate((string)error?.Element(Ns + "Message"), 2000),
+                            ["stackTrace"] = Truncate(stack, 1500),
+                        });
+                    }
+                }
+                result["succeeded"] = exitCode == 0 && failed == 0;
+                result["total"] = total;
+                result["passed"] = passed;
+                result["failed"] = failed;
+                result["skipped"] = Math.Max(0, total - passed - failed); // ignorés, non concluants… : tout ce qui n'est ni réussi ni échoué
+                result["failures"] = failures;
+                result["reports"] = trx.Length;
+                if (total == 0) result["note"] = string.IsNullOrEmpty(filter)
+                    ? "No tests were found in this project."
+                    : "No tests matched the filter. Use FullyQualifiedName~<substring> or DisplayName~<substring>.";
+                if (exitCode != 0 && failed == 0) result["output"] = Tail(output.ToString(), 40);
                 return result;
             }
-
-            long total = 0, passed = 0, failed = 0, skipped = 0;
-            var failures = new JArray();
-            foreach (var file in trx)
+            finally
             {
-                var doc = XDocument.Load(file);
-                var counters = doc.Descendants(Ns + "Counters").FirstOrDefault();
-                if (counters != null)
-                {
-                    total += Attr(counters, "total");
-                    passed += Attr(counters, "passed");
-                    failed += Attr(counters, "failed");
-                    skipped += Attr(counters, "total") - Attr(counters, "executed") + Attr(counters, "notExecuted");
-                }
-                foreach (var r in doc.Descendants(Ns + "UnitTestResult"))
-                {
-                    var outcome = (string)r.Attribute("outcome");
-                    if (outcome == "Passed" || outcome == "NotExecuted") continue;
-                    var error = r.Descendants(Ns + "ErrorInfo").FirstOrDefault();
-                    var stack = (string)error?.Element(Ns + "StackTrace");
-                    failures.Add(new JObject
-                    {
-                        ["test"] = (string)r.Attribute("testName"),
-                        ["outcome"] = outcome,
-                        ["duration"] = (string)r.Attribute("duration"),
-                        ["message"] = Truncate((string)error?.Element(Ns + "Message"), 2000),
-                        ["stackTrace"] = Truncate(stack, 1500),
-                    });
-                }
+                try { Directory.Delete(resultsDir, true); } catch { }
             }
-            result["succeeded"] = exitCode == 0 && failed == 0;
-            result["total"] = total;
-            result["passed"] = passed;
-            result["failed"] = failed;
-            result["skipped"] = Math.Max(0, skipped);
-            result["failures"] = failures;
-            if (total == 0) result["note"] = string.IsNullOrEmpty(filter)
-                ? "No tests were found in this project."
-                : "No tests matched the filter. Use FullyQualifiedName~<substring> or DisplayName~<substring>.";
-            if (exitCode != 0 && failed == 0) result["output"] = Tail(output.ToString(), 40);
-            try { Directory.Delete(resultsDir, true); } catch { }
-            return result;
+        }
+
+        /// <summary>Tue dotnet et ses descendants (vstest.console, testhost…) ; Kill() ne touche que le parent.</summary>
+        private static void KillTree(Process p, Log log)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("taskkill", $"/T /F /PID {p.Id}") { UseShellExecute = false, CreateNoWindow = true };
+                using (var kill = Process.Start(psi)) kill?.WaitForExit(5000);
+            }
+            catch (Exception ex) { log.Error("taskkill : " + ex.Message); }
+            try { if (!p.HasExited) p.Kill(); } catch { }
         }
 
         private static long Attr(XElement e, string name) => long.TryParse((string)e.Attribute(name), out var v) ? v : 0;
@@ -137,6 +162,5 @@ namespace ClaudeVS
             var all = text.Replace("\r\n", "\n").Split('\n').Where(l => l.Trim().Length > 0).ToList();
             return string.Join("\n", all.Skip(Math.Max(0, all.Count - lines)));
         }
-        private static string Quote(string a) => a.IndexOfAny(new[] { ' ', '"', ';' }) < 0 ? a : "\"" + a.Replace("\"", "\\\"") + "\"";
     }
 }

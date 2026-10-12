@@ -10,7 +10,6 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.Threading;
 using Newtonsoft.Json.Linq;
-using Thread = EnvDTE.Thread;
 
 namespace ClaudeVS
 {
@@ -33,7 +32,8 @@ namespace ClaudeVS
         private static readonly Guid BuildPane = new Guid("1BD8A850-02E1-11D1-BEE7-00A0C913D1F8");
 
         private readonly AsyncPackage _package;
-        private static int _waiting; // nombre d'outils en attente d'un arrêt du programme (toutes instances)
+        private DTE2 _dte;
+        private int _waiting; // nombre d'outils en attente d'un arrêt du programme (l'instance est partagée avec DebugMonitor)
 
         public DebugTools(AsyncPackage package) => _package = package;
 
@@ -53,9 +53,9 @@ namespace ClaudeVS
             {
                 ["project"] = IdeTools.Str("Optional project name to build instead of the whole solution."),
             }),
-            IdeTools.Tool("debugStart", "Start debugging in Visual Studio (F5) and wait until the program stops at a breakpoint, throws, or exits.", new JObject
+            IdeTools.Tool("debugStart", "Start debugging in Visual Studio (F5): builds if needed, then waits until the program stops at a breakpoint, throws, or exits.", new JObject
             {
-                ["project"] = IdeTools.Str("Optional project to set as the startup project before starting."),
+                ["project"] = IdeTools.Str("Optional project to set as the startup project before starting. Side effect: it stays the solution's startup project afterwards (restored only if the launch fails)."),
                 ["timeoutSeconds"] = IdeTools.Int("How long to wait for a break or for the program to end (default 30). On timeout the program keeps running."),
             }),
             IdeTools.Tool("debugStop", "Stop the debugging session (Shift+F5)."),
@@ -102,12 +102,13 @@ namespace ClaudeVS
             TestTools.Definition(),
         };
 
+        // DTE est un singleton stable du processus : résolu une fois, pas à chaque tour de sondage
         private DTE2 Dte
         {
             get
             {
                 ThreadHelper.ThrowIfNotOnUIThread();
-                return (DTE2)Package.GetGlobalService(typeof(SDTE));
+                return _dte ?? (_dte = (DTE2)Package.GetGlobalService(typeof(SDTE)));
             }
         }
 
@@ -132,8 +133,12 @@ namespace ClaudeVS
                     Dte.Debugger.Break(false);
                     return IdeTools.Json(await WaitForBreakOrEndAsync(10));
                 case "debugWait":
-                    if (Dte.Debugger.CurrentMode == dbgDebugMode.dbgDesignMode) throw new InvalidOperationException("Not debugging." + RecentDebugOutput());
-                    return IdeTools.Json(await WaitForBreakOrEndAsync(Math.Min(600, (int?)args["timeoutSeconds"] ?? 120)));
+                {
+                    // Un build de lancement encore en cours (debugStart revenu sur son timeout) compte comme « en train de démarrer »
+                    var building = Dte.Solution.SolutionBuild.BuildState == vsBuildState.vsBuildStateInProgress;
+                    if (Dte.Debugger.CurrentMode == dbgDebugMode.dbgDesignMode && !building) throw new InvalidOperationException("Not debugging." + RecentDebugOutput());
+                    return IdeTools.Json(await WaitForBreakOrEndAsync(Math.Min(600, (int?)args["timeoutSeconds"] ?? 120), launching: building));
+                }
                 case "debugState": return IdeTools.Json(State());
                 case "debugLocals": return Locals((int?)args["frameIndex"] ?? 0, Math.Min(3, Math.Max(0, (int?)args["maxDepth"] ?? 1)));
                 case "debugEvaluate": return Evaluate((string)args["expression"]);
@@ -152,12 +157,14 @@ namespace ClaudeVS
         {
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
             var target = (string)args["project"];
-            // Un projet « .csproj » ouvert seul : Solution.FullName est vide, on se rabat sur le projet
-            var solutionPath = Dte.Solution.FullName;
-            var first = Dte.Solution.Projects.Cast<Project>().FirstOrDefault(p => !string.IsNullOrEmpty(p.FullName));
-            var baseDir = Path.GetDirectoryName(!string.IsNullOrEmpty(solutionPath) ? solutionPath : first?.FullName ?? "");
-            if (string.IsNullOrEmpty(target)) target = !string.IsNullOrEmpty(solutionPath) ? solutionPath : first?.FullName;
-            else if (!Path.IsPathRooted(target) && !string.IsNullOrEmpty(baseDir)) target = Path.Combine(baseDir, target);
+            if (string.IsNullOrEmpty(target))
+            {
+                // Un projet « .csproj » ouvert seul : Solution.FullName est vide, on se rabat sur le projet
+                var solutionPath = Dte.Solution.FullName;
+                target = !string.IsNullOrEmpty(solutionPath) ? solutionPath
+                    : Dte.Solution.Projects.Cast<Project>().FirstOrDefault(p => !string.IsNullOrEmpty(p.FullName))?.FullName;
+            }
+            else target = PathResolver.Resolve(target, mustExist: false); // peut être un dossier
             var log = ClaudeVSPackage.Instance.Log;
 
             await TaskScheduler.Default; // le processus tourne hors du thread principal
@@ -176,10 +183,11 @@ namespace ClaudeVS
                 throw new InvalidOperationException("A build is already in progress.");
 
             var config = build.ActiveConfiguration?.Name ?? "Debug";
-            if (string.IsNullOrEmpty(projectName))
+            var project = string.IsNullOrEmpty(projectName) ? null : FindProject(projectName);
+            if (project == null)
                 build.Build(false);
             else
-                build.BuildProject(config, FindProject(projectName).UniqueName, false);
+                build.BuildProject(config, project.UniqueName, false);
 
             // On sonde plutôt que Build(true) pour laisser l'interface de VS respirer
             var deadline = DateTime.UtcNow.AddMinutes(10);
@@ -188,13 +196,17 @@ namespace ClaudeVS
                 await Task.Delay(300);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
             }
+            var timedOut = build.BuildState == vsBuildState.vsBuildStateInProgress;
 
+            // La liste d'erreurs mélange build et IntelliSense, tous projets : on filtre au moins sur le projet demandé
             var errors = new JArray();
             int warnings = 0;
             var items = Dte.ToolWindows.ErrorList.ErrorItems;
             for (var i = 1; i <= items.Count; i++)
             {
                 var item = items.Item(i);
+                if (project != null && !string.Equals(item.Project, project.Name, StringComparison.OrdinalIgnoreCase)
+                                    && !string.Equals(item.Project, project.UniqueName, StringComparison.OrdinalIgnoreCase)) continue;
                 if (item.ErrorLevel == vsBuildErrorLevel.vsBuildErrorLevelMedium) { warnings++; continue; }
                 if (item.ErrorLevel != vsBuildErrorLevel.vsBuildErrorLevelHigh) continue;
                 errors.Add(new JObject
@@ -202,15 +214,21 @@ namespace ClaudeVS
                     ["file"] = item.FileName, ["line"] = item.Line, ["message"] = item.Description, ["project"] = item.Project,
                 });
             }
-            return IdeTools.Json(new JObject
+            var result = new JObject
             {
-                ["succeeded"] = build.LastBuildInfo == 0 && build.BuildState == vsBuildState.vsBuildStateDone,
+                ["succeeded"] = !timedOut && build.LastBuildInfo == 0 && build.BuildState == vsBuildState.vsBuildStateDone,
                 ["configuration"] = config,
                 ["failedProjects"] = build.LastBuildInfo,
                 ["errorCount"] = errors.Count,
                 ["warningCount"] = warnings,
                 ["errors"] = errors,
-            });
+            };
+            if (timedOut)
+            {
+                result["timedOut"] = true;
+                result["note"] = "The build is still running after 10 minutes; the counts above are not final. Call getOutput with pane 'build' later.";
+            }
+            return IdeTools.Json(result);
         }
 
         private Project FindProject(string name)
@@ -242,14 +260,44 @@ namespace ClaudeVS
             var dbg = Dte.Debugger;
             if (dbg.CurrentMode != dbgDebugMode.dbgDesignMode)
                 throw new InvalidOperationException("A debugging session is already active. Use debugContinue, or debugStop first.");
+            var build = Dte.Solution.SolutionBuild;
+            // Le projet de démarrage est modifié durablement (effet de bord documenté) ; on ne le restaure que si rien ne démarre
+            object previousStartup = null;
             if (!string.IsNullOrEmpty(projectName))
-                Dte.Solution.SolutionBuild.StartupProjects = new object[] { FindProject(projectName).UniqueName };
-            dbg.Go(false);
-            var state = await WaitForBreakOrEndAsync(timeoutSeconds);
-            // Compilation échouée ou démarrage impossible : rien ne tourne, le volet Build explique pourquoi
-            if ((string)state["mode"] == "design" && Dte.Solution.SolutionBuild.LastBuildInfo > 0)
-                state["note"] = "The build failed before starting. Call getOutput with pane 'build' or build for the errors.";
+            {
+                previousStartup = build.StartupProjects;
+                build.StartupProjects = new object[] { FindProject(projectName).UniqueName };
+            }
+            JObject state;
+            try
+            {
+                dbg.Go(false);
+                state = await WaitForBreakOrEndAsync(timeoutSeconds, launching: true);
+            }
+            catch
+            {
+                await _package.JoinableTaskFactory.SwitchToMainThreadAsync(); // l'exception a pu survenir pendant un Task.Delay
+                RestoreStartup(previousStartup);
+                throw;
+            }
+            // Compilation échouée ou démarrage impossible : rien ne tourne, le volet Build explique pourquoi.
+            // Si le build dépasse le timeout, il est encore en cours : LastBuildInfo (build précédent) ne dit rien,
+            // le programme va encore se lancer, et le projet de démarrage doit rester en place.
+            if ((string)state["mode"] == "design" && build.BuildState != vsBuildState.vsBuildStateInProgress)
+            {
+                RestoreStartup(previousStartup);
+                if (build.LastBuildInfo > 0)
+                    state["note"] = "The build failed before starting. Call getOutput with pane 'build' or build for the errors.";
+            }
             return IdeTools.Json(state);
+        }
+
+        private void RestoreStartup(object previous)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (previous == null) return;
+            try { Dte.Solution.SolutionBuild.StartupProjects = previous; }
+            catch (Exception ex) { ClaudeVSPackage.Instance?.Log.Error("Restauration du projet de démarrage : " + ex.Message); }
         }
 
         /// <summary>
@@ -307,15 +355,18 @@ namespace ClaudeVS
             ThreadHelper.ThrowIfNotOnUIThread();
             try
             {
-                var text = (string)((JObject)GetOutput("debug", 8)["content"][0]["text"]);
-                var tail = (string)JObject.Parse(text)["text"];
+                var tail = (string)ReadPane("debug", 8)["text"];
                 return string.IsNullOrWhiteSpace(tail) ? "" : "\nRecent debug output:\n" + tail;
             }
             catch { return ""; }
         }
 
-        /// <summary>Attend que le programme s'arrête (point d'arrêt, exception, pas) ou se termine.</summary>
-        private async Task<JObject> WaitForBreakOrEndAsync(int timeoutSeconds)
+        /// <summary>
+        /// Attend que le programme s'arrête (point d'arrêt, exception, pas) ou se termine. Au lancement
+        /// (<paramref name="launching"/>), le mode conception pendant la compilation, puis pendant les
+        /// quelques secondes où le débogueur démarre après un build réussi, compte comme « en cours ».
+        /// </summary>
+        private async Task<JObject> WaitForBreakOrEndAsync(int timeoutSeconds, bool launching = false)
         {
             var deadline = DateTime.UtcNow.AddSeconds(Math.Max(1, timeoutSeconds));
             System.Threading.Interlocked.Increment(ref _waiting);
@@ -323,14 +374,30 @@ namespace ClaudeVS
             {
                 // Laisse le temps au débogueur de quitter le mode précédent avant de sonder
                 await Task.Delay(300);
+                DateTime? startGrace = null; // délai accordé au débogueur pour quitter le mode conception après le build
                 while (true)
                 {
                     await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
                     var mode = Dte.Debugger.CurrentMode;
-                    if (mode != dbgDebugMode.dbgRunMode || DateTime.UtcNow > deadline)
+                    var build = Dte.Solution.SolutionBuild;
+                    var building = build.BuildState == vsBuildState.vsBuildStateInProgress;
+                    var starting = false;
+                    if (launching && mode == dbgDebugMode.dbgDesignMode)
+                    {
+                        if (building) { starting = true; startGrace = null; }
+                        else if (build.LastBuildInfo == 0)
+                        {
+                            startGrace = startGrace ?? DateTime.UtcNow.AddSeconds(3);
+                            starting = DateTime.UtcNow < startGrace;
+                        }
+                    }
+                    var running = mode == dbgDebugMode.dbgRunMode || starting;
+                    if (!running || DateTime.UtcNow > deadline)
                     {
                         var state = State();
-                        if (mode == dbgDebugMode.dbgRunMode)
+                        if (building)
+                            state["note"] = "Still building after the timeout. Call debugWait to keep waiting, or getOutput with pane 'build'.";
+                        else if (running)
                             state["note"] = "Still running after the timeout (waiting for input, or long task). Call debugWait to keep waiting, debugBreak to pause it, or debugStop.";
                         return state;
                     }
@@ -460,21 +527,10 @@ namespace ClaudeVS
 
         // ---- Points d'arrêt --------------------------------------------------------------
 
-        private string ResolveFile(string file)
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            if (string.IsNullOrEmpty(file)) throw new ArgumentException("file is required");
-            if (!Path.IsPathRooted(file) && Dte.Solution.FullName is string sln && !string.IsNullOrEmpty(sln))
-                file = Path.Combine(Path.GetDirectoryName(sln), file);
-            file = Path.GetFullPath(file);
-            if (!File.Exists(file)) throw new FileNotFoundException("File not found: " + file);
-            return file;
-        }
-
         private JObject BreakpointAdd(string file, int line, string condition)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            file = ResolveFile(file);
+            file = PathResolver.Resolve(file, mustExist: true);
             if (line < 1) throw new ArgumentException("line must be >= 1");
             Dte.Debugger.Breakpoints.Add(File: file, Line: line, Condition: condition ?? "",
                 ConditionType: dbgBreakpointConditionType.dbgBreakpointConditionTypeWhenTrue);
@@ -484,7 +540,7 @@ namespace ClaudeVS
         private JObject BreakpointRemove(string file, int line)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            file = ResolveFile(file);
+            file = PathResolver.Resolve(file, mustExist: true);
             var removed = 0;
             foreach (var bp in Dte.Debugger.Breakpoints.Cast<Breakpoint>().ToList())
             {
@@ -516,12 +572,19 @@ namespace ClaudeVS
         private JObject GetOutput(string pane, int tail)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
+            return IdeTools.Json(ReadPane(pane, tail));
+        }
+
+        /// <summary>Dernières lignes d'un volet de la fenêtre Sortie (valeur brute, sans enveloppe MCP).</summary>
+        private JObject ReadPane(string pane, int tail)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
             var wanted = pane == "build" ? BuildPane : DebugPane;
             OutputWindowPane found = null;
             foreach (OutputWindowPane p in Dte.ToolWindows.OutputWindow.OutputWindowPanes)
                 if (Guid.TryParse(p.Guid, out var g) && g == wanted) { found = p; break; }
             if (found == null)
-                return IdeTools.Json(new JObject { ["pane"] = pane, ["text"] = "", ["note"] = "This pane has not been created yet." });
+                return new JObject { ["pane"] = pane, ["text"] = "", ["note"] = "This pane has not been created yet." };
 
             var doc = found.TextDocument;
             var text = doc.StartPoint.CreateEditPoint().GetText(doc.EndPoint);
@@ -531,7 +594,7 @@ namespace ClaudeVS
                 lines = lines.Where(l => !(l.Contains("): Loaded '") || l.Contains("): Unloaded '") || l.Contains("Skipped loading symbols")));
             var all = lines.ToList();
             var kept = all.Skip(Math.Max(0, all.Count - Math.Max(1, tail)));
-            return IdeTools.Json(new JObject { ["pane"] = pane, ["totalLines"] = all.Count, ["text"] = string.Join("\n", kept) });
+            return new JObject { ["pane"] = pane, ["totalLines"] = all.Count, ["text"] = string.Join("\n", kept) };
         }
     }
 }

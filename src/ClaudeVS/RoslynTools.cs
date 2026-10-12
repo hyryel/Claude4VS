@@ -31,6 +31,9 @@ namespace ClaudeVS
         };
 
         private const int MaxResults = 300;
+        private static readonly TimeSpan MaxDuration = TimeSpan.FromSeconds(120); // borne des opérations Roslyn (solution énorme ou en cours de chargement)
+        private static readonly TimeSpan LongDuration = TimeSpan.FromMinutes(10); // renommage et diagnostics de toute la solution : compilation complète
+        private const int ConflictCheckMaxDocuments = 25; // au-delà, la vérification des conflits de renommage coûterait des minutes
         private readonly AsyncPackage _package;
 
         public RoslynTools(AsyncPackage package) => _package = package;
@@ -56,7 +59,7 @@ namespace ClaudeVS
             {
                 ["file"] = IdeTools.Str("Path to the source file."),
             }, "file"),
-            IdeTools.Tool("semanticDiagnostics", "Compiler and analyzer diagnostics from Roslyn, with exact ranges, without building. For one file, or the whole solution.", new JObject
+            IdeTools.Tool("semanticDiagnostics", "Compiler diagnostics from Roslyn (syntax and semantic errors/warnings; code analyzers are not run), with exact ranges, without building. For one file, or the whole solution.", new JObject
             {
                 ["file"] = IdeTools.Str("Optional source file. Without it, all projects are analyzed (slower on large solutions)."),
                 ["minSeverity"] = new JObject { ["type"] = "string", ["enum"] = new JArray("error", "warning", "info"), ["description"] = "Minimum severity (default warning)." },
@@ -84,35 +87,46 @@ namespace ClaudeVS
             return ws;
         }
 
-        public async Task<JObject> CallAsync(string name, JObject args)
+        /// <param name="outer">Annulé si le client se déconnecte ; un délai maximal s'y ajoute.</param>
+        public async Task<JObject> CallAsync(string name, JObject args, CancellationToken outer)
         {
             var ws = await GetWorkspaceAsync();
             var solution = ws.CurrentSolution;
+            // Le chemin se résout sur le thread principal (solution VS), avant de passer en arrière-plan
+            var file = (string)args["file"];
+            if (!string.IsNullOrEmpty(file)) args["file"] = PathResolver.Resolve(file, mustExist: true);
             await TaskScheduler.Default; // Roslyn travaille hors du thread principal
-            var ct = CancellationToken.None;
-            switch (name)
+            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(outer))
             {
-                case "findSymbol": return await FindSymbolAsync(solution, (string)args["query"], (string)args["kind"] ?? "any", ct);
-                case "symbolInfo": return IdeTools.Json(Describe(await ResolveAsync(solution, args, ct), ct));
-                case "findReferences": return await FindReferencesAsync(solution, await ResolveAsync(solution, args, ct), ct);
-                case "documentSymbols": return await DocumentSymbolsAsync(solution, (string)args["file"], ct);
-                case "semanticDiagnostics": return await DiagnosticsAsync(solution, (string)args["file"], (string)args["minSeverity"] ?? "warning", ct);
-                case "renameSymbol": return await RenameAsync(ws, solution, args, ct);
-                default: throw new InvalidOperationException("Unknown tool: " + name);
+                var limit = name == "renameSymbol" || (name == "semanticDiagnostics" && string.IsNullOrEmpty(file)) ? LongDuration : MaxDuration;
+                cts.CancelAfter(limit);
+                var ct = cts.Token;
+                try
+                {
+                    switch (name)
+                    {
+                        case "findSymbol": return await FindSymbolAsync(solution, (string)args["query"], (string)args["kind"] ?? "any", ct);
+                        case "symbolInfo": return IdeTools.Json(Describe(await ResolveAsync(solution, args, ct), ct));
+                        case "findReferences": return await FindReferencesAsync(solution, await ResolveAsync(solution, args, ct), ct);
+                        case "documentSymbols": return await DocumentSymbolsAsync(solution, (string)args["file"], ct);
+                        case "semanticDiagnostics": return await DiagnosticsAsync(solution, (string)args["file"], (string)args["minSeverity"] ?? "warning", ct);
+                        case "renameSymbol": return await RenameAsync(ws, solution, args, ct);
+                        default: throw new InvalidOperationException("Unknown tool: " + name);
+                    }
+                }
+                catch (OperationCanceledException) when (!outer.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"{name} did not complete within {limit.TotalSeconds:0} s (solution still loading, or too large). Retry, or narrow the request to one file.");
+                }
             }
         }
 
         // ---- Résolution d'un symbole ---------------------------------------------------------------
 
+        /// <summary>Document Roslyn d'un chemin déjà résolu par <see cref="PathResolver"/> (absolu).</summary>
         private static Document FindDocument(Solution solution, string file)
         {
             if (string.IsNullOrEmpty(file)) throw new ArgumentException("file is required");
-            if (!Path.IsPathRooted(file))
-            {
-                var root = Path.GetDirectoryName(solution.FilePath ?? solution.Projects.First().FilePath ?? "");
-                if (!string.IsNullOrEmpty(root)) file = Path.Combine(root, file);
-            }
-            file = Path.GetFullPath(file);
             var id = solution.GetDocumentIdsWithFilePath(file).FirstOrDefault()
                      ?? throw new FileNotFoundException("File is not part of a loaded C#/VB project: " + file);
             return solution.GetDocument(id);
@@ -141,9 +155,9 @@ namespace ClaudeVS
             else if (!string.IsNullOrEmpty(name))
             {
                 var simple = name.Substring(name.LastIndexOf('.') + 1);
-                col = Regex.Match(lineText, $@"\b{Regex.Escape(simple)}\b").Index;
-                if (col < 0 || !Regex.IsMatch(lineText, $@"\b{Regex.Escape(simple)}\b"))
-                    throw new ArgumentException($"'{simple}' not found on line {line}: {lineText.Trim()}");
+                var m = Regex.Match(lineText, $@"\b{Regex.Escape(simple)}\b");
+                if (!m.Success) throw new ArgumentException($"'{simple}' not found on line {line}: {lineText.Trim()}");
+                col = m.Index;
             }
             else col = Regex.Match(lineText, @"[A-Za-z_]\w*").Index;
 
@@ -160,8 +174,7 @@ namespace ClaudeVS
                     symbol = info.Symbol ?? info.CandidateSymbols.FirstOrDefault();
                 }
                 if (symbol is IAliasSymbol alias) symbol = alias.Target;
-                if (symbol != null && symbol.Kind != SymbolKind.Namespace || symbol is INamespaceSymbol)
-                    return symbol;
+                if (symbol != null) return symbol; // premier symbole trouvé en remontant l'arbre, espace de noms compris
             }
             throw new InvalidOperationException($"No symbol at {Path.GetFileName(file)}:{line}:{col + 1} ('{token.Text}').");
         }
@@ -196,14 +209,15 @@ namespace ClaudeVS
                 .GroupBy(s => s.ToDisplayString()).Select(g => g.First())
                 .OrderBy(s => s.Name.Equals(query, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
                 .ThenBy(s => s.Name.Length).ThenBy(s => s.ToDisplayString())
-                .Take(100)
-                .Select(s => new JObject
-                {
-                    ["kind"] = KindName(s),
-                    ["name"] = s.ToDisplayString(),
-                    ["location"] = Where(s),
-                });
-            return IdeTools.Json(new JObject { ["count"] = results.Count, ["symbols"] = new JArray(filtered) });
+                .ToList();
+            const int shown = 100;
+            var symbols = filtered.Take(shown).Select(s => new JObject
+            {
+                ["kind"] = KindName(s),
+                ["name"] = s.ToDisplayString(),
+                ["location"] = Where(s),
+            });
+            return IdeTools.Json(new JObject { ["count"] = filtered.Count, ["symbols"] = new JArray(symbols), ["truncated"] = filtered.Count > shown });
         }
 
         private static bool MatchesKind(ISymbol s, string kind)
@@ -370,8 +384,13 @@ namespace ClaudeVS
             var newSolution = await Renamer.RenameSymbolAsync(solution, symbol, options, newName, ct);
 
             var files = new JArray();
+            var introduced = new List<string>(); // erreurs de compilation apparues dans les documents modifiés (conflit de nom)
             var changes = newSolution.GetChanges(solution);
-            foreach (var projectChanges in changes.GetProjectChanges())
+            var projectChangesList = changes.GetProjectChanges().ToList();
+            // La vérification des conflits coûte deux modèles sémantiques par document : on la réserve aux renommages contenus
+            var changedCount = projectChangesList.Sum(p => p.GetChangedDocuments().Count());
+            var checkConflicts = changedCount <= ConflictCheckMaxDocuments;
+            foreach (var projectChanges in projectChangesList)
             {
                 foreach (var docId in projectChanges.GetChangedDocuments())
                 {
@@ -382,12 +401,16 @@ namespace ClaudeVS
                     // Avant application, Roslyn ne change que le nom du document, pas encore le chemin
                     if (!string.Equals(newDoc.Name, oldDoc.Name, StringComparison.OrdinalIgnoreCase)) entry["renamedTo"] = newDoc.Name;
                     files.Add(entry);
+                    if (checkConflicts) introduced.AddRange(await NewErrorsAsync(oldDoc, newDoc, ct));
                 }
                 foreach (var docId in projectChanges.GetAddedDocuments())
                     files.Add(new JObject { ["file"] = newSolution.GetDocument(docId)?.FilePath, ["added"] = true });
                 foreach (var docId in projectChanges.GetRemovedDocuments())
                     files.Add(new JObject { ["file"] = solution.GetDocument(docId)?.FilePath, ["removed"] = true });
             }
+            if (introduced.Count > 0)
+                throw new InvalidOperationException($"Renaming '{symbol.Name}' to '{newName}' would introduce {introduced.Count} compile error(s) (name conflict?); nothing was applied:\n"
+                    + string.Join("\n", introduced.Take(10).Select(e => "- " + e)));
 
             var preview = (bool?)args["preview"] ?? false;
             var applied = false;
@@ -406,8 +429,30 @@ namespace ClaudeVS
                 ["newName"] = newName,
                 ["files"] = files,
                 ["applied"] = applied,
-                ["note"] = applied ? "Applied in Visual Studio (undo with Ctrl+Z there). Files were modified by the IDE, not by your Edit tool: re-read them if needed."
-                                   : "Preview only, nothing changed.",
+                ["note"] = (applied ? "Applied in Visual Studio (undo with Ctrl+Z there). Files were modified by the IDE, not by your Edit tool: re-read them if needed."
+                                    : "Preview only, nothing changed.")
+                         + (checkConflicts ? "" : $" Name-conflict check skipped ({changedCount} files changed, more than {ConflictCheckMaxDocuments}): build to verify."),
+            });
+        }
+
+        /// <summary>
+        /// Erreurs de compilation d'un document après renommage qui n'existaient pas avant. Comparaison sur le
+        /// nombre (les messages citant l'ancien nom changent de texte), puis liste des messages nouveaux.
+        /// </summary>
+        private static async Task<IEnumerable<string>> NewErrorsAsync(Document oldDoc, Document newDoc, CancellationToken ct)
+        {
+            var before = (await oldDoc.GetSemanticModelAsync(ct)).GetDiagnostics(cancellationToken: ct)
+                .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+            var after = (await newDoc.GetSemanticModelAsync(ct)).GetDiagnostics(cancellationToken: ct)
+                .Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+            if (after.Count <= before.Count) return Enumerable.Empty<string>();
+            var known = new HashSet<string>(before.Select(d => d.Id + d.GetMessage()));
+            var added = after.Where(d => !known.Contains(d.Id + d.GetMessage())).ToList();
+            if (added.Count == 0) added = after;
+            return added.Select(d =>
+            {
+                var span = d.Location.GetLineSpan();
+                return $"{Path.GetFileName(span.Path)}:{span.StartLinePosition.Line + 1}: {d.Id} {d.GetMessage()}";
             });
         }
 

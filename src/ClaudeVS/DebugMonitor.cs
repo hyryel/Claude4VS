@@ -20,13 +20,14 @@ namespace ClaudeVS
         /// <summary>Le débogueur vient de s'arrêter sur une exception (état complet : position, pile, exception).</summary>
         public static event Action<JObject> BreakOnException;
 
-        private DebugMonitor(AsyncPackage package) => _tools = new DebugTools(package);
+        private DebugMonitor(DebugTools tools) => _tools = tools;
 
-        public static void Start(AsyncPackage package)
+        /// <param name="tools">L'instance d'IdeTools, pour voir ses attentes en cours (IsWaiting).</param>
+        public static void Start(DebugTools tools)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (_instance != null) return;
-            _instance = new DebugMonitor(package);
+            _instance = new DebugMonitor(tools);
             var dte = (DTE2)Package.GetGlobalService(typeof(SDTE));
             _instance._events = dte.Events.DebuggerEvents;
             _instance._events.OnEnterBreakMode += _instance.OnEnterBreakMode;
@@ -44,9 +45,11 @@ namespace ClaudeVS
         private void OnEnterBreakMode(dbgEventReason reason, ref dbgExecutionAction action)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            ClaudeVSPackage.Instance?.EnsureChatVisible();
             if (reason != dbgEventReason.dbgEventReasonExceptionThrown && reason != dbgEventReason.dbgEventReasonExceptionNotHandled)
                 return;
+            // Le panneau n'est réaffiché que pour une exception (il en montre le détail) : un point d'arrêt ou
+            // un pas ne doit pas rouvrir un panneau que l'utilisateur a fermé
+            ClaudeVSPackage.Instance?.EnsureChatVisible();
             // Un outil (debugStart, debugContinue…) est en train d'attendre cet arrêt : il le rapportera lui-même
             if (_tools.IsWaiting) return;
             try

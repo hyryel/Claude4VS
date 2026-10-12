@@ -26,9 +26,26 @@ namespace ClaudeVS
         private readonly AsyncPackage _package;
         private readonly Dictionary<string, PendingDiff> _pending = new Dictionary<string, PendingDiff>();
 
-        private DiffManager(AsyncPackage package) => _package = package;
+        private DiffManager(AsyncPackage package)
+        {
+            _package = package;
+            _ = Task.Run(PurgeStaleTemp);
+        }
 
         public static DiffManager GetInstance(AsyncPackage package) => _instance ?? (_instance = new DiffManager(package));
+
+        /// <summary>Dossiers de diff laissés par des sessions précédentes (fichier verrouillé, VS tué) : purge au démarrage, au mieux.</summary>
+        private static void PurgeStaleTemp()
+        {
+            try
+            {
+                if (!Directory.Exists(TempRoot)) return;
+                var limit = DateTime.UtcNow.AddDays(-2);
+                foreach (var dir in Directory.GetDirectories(TempRoot))
+                    if (Directory.GetLastWriteTimeUtc(dir) < limit) TryDelete(dir);
+            }
+            catch { }
+        }
 
         public static bool IsTempPath(string path) =>
             !string.IsNullOrEmpty(path) && path.StartsWith(TempRoot, StringComparison.OrdinalIgnoreCase);
@@ -72,6 +89,11 @@ namespace ClaudeVS
                 leftIsTemp ? $"{fileName} (nouveau fichier)" : $"{fileName} (actuel)",
                 $"{fileName} (proposé par Claude)",
                 $"Claude : {fileName}", null, options);
+            if (frame == null)
+            {
+                TryDelete(dir);
+                throw new InvalidOperationException("Visual Studio could not open the comparison window for " + fileName);
+            }
 
             var pending = new PendingDiff(this, tabName, frame, right);
             _pending[tabName] = pending;

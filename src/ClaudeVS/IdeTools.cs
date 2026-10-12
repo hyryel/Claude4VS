@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using EnvDTE;
 using EnvDTE80;
@@ -36,6 +37,7 @@ namespace ClaudeVS
         }
 
         internal EditorTools Editor => _editor;
+        internal DebugTools Debug => _debug;
 
         public static JArray Text(params string[] texts) =>
             new JArray(texts.Select(t => new JObject { ["type"] = "text", ["text"] = t }));
@@ -82,7 +84,7 @@ namespace ClaudeVS
                 Tool("openFile", "Open a file in the editor and optionally select a range of text", new JObject
                 {
                     ["filePath"] = Str("Path to the file to open"),
-                    ["preview"] = Bool("Whether to open the file in preview mode", false),
+                    ["preview"] = Bool("Whether to open the file in preview mode (provisional tab)", false),
                     ["startText"] = Str("Text pattern to find the start of the selection range. Selects from the beginning of this match."),
                     ["endText"] = Str("Text pattern to find the end of the selection range. Selects up to the end of this match. If not provided, only the startText match will be selected."),
                     ["selectToEndOfLine"] = Bool("If true, selection will extend to the end of the line containing the endText match.", false),
@@ -109,7 +111,8 @@ namespace ClaudeVS
 
         // ---- Dispatch --------------------------------------------------------------------
 
-        public async Task<JObject> CallAsync(string name, JObject args)
+        /// <param name="ct">Annulé quand le client qui a demandé l'outil se déconnecte (utilisé par les outils longs).</param>
+        public async Task<JObject> CallAsync(string name, JObject args, CancellationToken ct = default)
         {
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
             switch (name)
@@ -134,7 +137,7 @@ namespace ClaudeVS
                 default:
                     if (DebugTools.Names.Contains(name)) return await _debug.CallAsync(name, args);
                     if (EditorTools.Names.Contains(name)) return await _editor.CallAsync(name, args);
-                    if (RoslynTools.Names.Contains(name)) return await _roslyn.CallAsync(name, args);
+                    if (RoslynTools.Names.Contains(name)) return await _roslyn.CallAsync(name, args, ct);
                     throw new InvalidOperationException("Unknown tool: " + name);
             }
         }
@@ -169,19 +172,6 @@ namespace ClaudeVS
                 })),
                 ["rootPath"] = folders.FirstOrDefault(),
             });
-        }
-
-        private static string Resolve(string path)
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            if (string.IsNullOrEmpty(path)) throw new ArgumentException("File path is required");
-            if (path.StartsWith("file:", StringComparison.OrdinalIgnoreCase)) path = new Uri(path).LocalPath;
-            if (!Path.IsPathRooted(path))
-            {
-                var root = WorkspaceFolders().FirstOrDefault();
-                if (root != null) path = Path.Combine(root, path);
-            }
-            return Path.GetFullPath(path);
         }
 
         // ---- Éditeurs --------------------------------------------------------------------
@@ -228,19 +218,26 @@ namespace ClaudeVS
 
         private async Task<JObject> OpenFileAsync(JObject args)
         {
-            var path = Resolve((string)args["filePath"]);
-            if (!File.Exists(path)) throw new FileNotFoundException("File not found: " + path);
+            await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+            var path = PathResolver.Resolve((string)args["filePath"], mustExist: true);
             var startText = (string)args["startText"];
             var endText = (string)args["endText"];
             var toEol = (bool?)args["selectToEndOfLine"] ?? false;
+            var preview = (bool?)args["preview"] ?? false;
+            var makeFrontmost = (bool?)args["makeFrontmost"] ?? true;
 
-            await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
-            VsShellUtilities.OpenDocument(_package, path, Guid.Empty, out _, out _, out var frame, out IVsTextView vsView);
-            frame?.Show();
+            IVsWindowFrame frame;
+            IVsTextView vsView;
+            // Onglet provisoire (aperçu) si demandé, comme un simple clic dans l'Explorateur de solutions
+            using (preview ? new NewDocumentStateScope(__VSNEWDOCUMENTSTATE.NDS_Provisional, VSConstants.NewDocumentStateReason.Navigation) : null)
+                VsShellUtilities.OpenDocument(_package, path, Guid.Empty, out _, out _, out frame, out vsView);
+            // makeFrontmost = false : l'onglet est ouvert sans voler le focus à l'éditeur courant
+            if (makeFrontmost) frame?.Show(); else frame?.ShowNoActivate();
             if (string.IsNullOrEmpty(startText) || vsView == null)
                 return Result("Opened file: " + path);
 
             var view = await GetWpfViewAsync(vsView);
+            if (view == null) return Result("Opened file: " + path + " (not a text editor: selection skipped)");
             var snapshot = view.TextSnapshot;
             var text = snapshot.GetText();
             var start = text.IndexOf(startText, StringComparison.Ordinal);
@@ -273,7 +270,7 @@ namespace ClaudeVS
         private JObject CheckDirty(string filePath)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            var path = Resolve(filePath);
+            var path = PathResolver.Resolve(filePath, mustExist: false);
             var doc = FindDocument(path);
             if (doc == null)
                 return Json(new JObject { ["success"] = false, ["message"] = "Document not open: " + path });
@@ -283,16 +280,20 @@ namespace ClaudeVS
         private JObject Save(string filePath)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            var path = Resolve(filePath);
+            var path = PathResolver.Resolve(filePath, mustExist: false);
             var doc = FindDocument(path);
             if (doc == null)
                 return Json(new JObject { ["success"] = false, ["message"] = "Document not open: " + path });
             var wasDirty = !doc.Saved;
-            if (wasDirty) doc.Save();
+            // Save() peut échouer ou être annulé par l'utilisateur (boîte de dialogue) : on lit son résultat
+            var status = wasDirty ? doc.Save() : vsSaveStatus.vsSaveSucceeded;
+            var saved = wasDirty && status == vsSaveStatus.vsSaveSucceeded;
             return Json(new JObject
             {
-                ["success"] = true, ["filePath"] = path, ["saved"] = wasDirty,
-                ["message"] = wasDirty ? "Document saved successfully" : "Document was not dirty or save failed",
+                ["success"] = status == vsSaveStatus.vsSaveSucceeded, ["filePath"] = path, ["saved"] = saved,
+                ["message"] = saved ? "Document saved successfully"
+                    : !wasDirty ? "Document was not dirty"
+                    : status == vsSaveStatus.vsSaveCancelled ? "Save cancelled by the user" : "Save failed (" + status + ")",
             });
         }
 
@@ -346,7 +347,7 @@ namespace ClaudeVS
         private JObject GetDiagnostics(string uri)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            string filter = string.IsNullOrEmpty(uri) ? null : Resolve(uri);
+            string filter = string.IsNullOrEmpty(uri) ? null : PathResolver.Resolve(uri, mustExist: false);
             var byFile = new Dictionary<string, JArray>(StringComparer.OrdinalIgnoreCase);
             var items = Dte.ToolWindows.ErrorList.ErrorItems;
             for (var i = 1; i <= items.Count; i++)

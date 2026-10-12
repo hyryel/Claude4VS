@@ -39,7 +39,7 @@ namespace ClaudeVS
             Tools = tools;
             Server = new IdeServer(tools, Log);
             Server.Start(await tools.GetWorkspaceFoldersAsync());
-            DebugMonitor.Start(this);
+            DebugMonitor.Start(tools.Debug);
 
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenSolution += (s, e) => RefreshWorkspace();
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterCloseSolution += (s, e) => RefreshWorkspace();
@@ -85,7 +85,9 @@ namespace ClaudeVS
             await JoinableTaskFactory.SwitchToMainThreadAsync();
             var mention = await tools.GetMentionAsync();
             if (mention == null) return;
-            var panelOpen = FindToolWindow(typeof(Chat.ChatToolWindow), 0, false) is Chat.ChatToolWindow existing && existing.Frame != null;
+            // La fenêtre reste en cache après fermeture par l'utilisateur : seul IsVisible dit si le panneau est affiché
+            var panelOpen = FindToolWindow(typeof(Chat.ChatToolWindow), 0, false) is Chat.ChatToolWindow existing
+                            && existing.Frame is IVsWindowFrame existingFrame && existingFrame.IsVisible() == VSConstants.S_OK;
             if (!panelOpen && Server.HasClient)
             {
                 Server.Notify("at_mentioned", mention);
@@ -100,8 +102,7 @@ namespace ClaudeVS
         {
             JoinableTaskFactory.RunAsync(async () =>
             {
-                var tools = new IdeTools(this);
-                Server.UpdateWorkspace(await tools.GetWorkspaceFoldersAsync());
+                Server.UpdateWorkspace(await Tools.GetWorkspaceFoldersAsync());
             }).FileAndForget("ClaudeVS/workspace");
         }
 
@@ -126,6 +127,7 @@ namespace ClaudeVS
         public void Error(string message) => Write("ERREUR : " + message);
 
         private static readonly string LogFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ClaudeVS", "claudevs.log");
+        private const long MaxLogBytes = 5 * 1024 * 1024; // au-delà, le journal est renommé en .1 (une seule génération conservée)
         private static readonly object FileGate = new object();
 
         private void Write(string message)
@@ -136,6 +138,12 @@ namespace ClaudeVS
                 lock (FileGate)
                 {
                     System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(LogFile));
+                    var info = new System.IO.FileInfo(LogFile);
+                    if (info.Exists && info.Length > MaxLogBytes)
+                    {
+                        System.IO.File.Delete(LogFile + ".1");
+                        System.IO.File.Move(LogFile, LogFile + ".1");
+                    }
                     System.IO.File.AppendAllText(LogFile, line);
                 }
             }

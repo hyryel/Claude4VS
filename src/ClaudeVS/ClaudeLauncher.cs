@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -44,20 +45,35 @@ namespace ClaudeVS
                 return;
             }
 
-            var cwd = package.Server != null && Package.GetGlobalService(typeof(SVsSolution)) is IVsSolution sln
+            if (package.Server == null)
+            {
+                VsShellUtilities.ShowMessageBox(package, "Le serveur MCP de ClaudeVS n'est pas démarré : impossible de lancer Claude relié à Visual Studio.", "ClaudeVS",
+                    OLEMSGICON.OLEMSGICON_WARNING, OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
+                return;
+            }
+
+            var cwd = Package.GetGlobalService(typeof(SVsSolution)) is IVsSolution sln
                       && sln.GetSolutionInfo(out var dir, out _, out _) == 0 && !string.IsNullOrEmpty(dir)
                 ? dir
                 : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
             var psi = new ProcessStartInfo(cmd.FileName)
             {
-                Arguments = string.Join(" ", cmd.PrefixArgs.Select(a => a.Contains(' ') ? "\"" + a + "\"" : a)),
+                Arguments = CommandLine.Join(cmd.PrefixArgs),
                 UseShellExecute = false, // nécessaire pour transmettre les variables d'environnement
                 WorkingDirectory = cwd,
             };
             psi.EnvironmentVariables["CLAUDE_CODE_SSE_PORT"] = package.Server.Port.ToString();
             psi.EnvironmentVariables["ENABLE_IDE_INTEGRATION"] = "true";
-            Process.Start(psi);
+            try { Process.Start(psi); }
+            catch (Exception ex) when (ex is Win32Exception || ex is InvalidOperationException || ex is FileNotFoundException)
+            {
+                // node hors PATH, exécutable supprimé entre-temps… : dans un gestionnaire de menu, l'exception serait avalée par VS
+                package.Log.Error($"Lancement de {cmd} : {ex.Message}");
+                VsShellUtilities.ShowMessageBox(package, $"Impossible de lancer Claude ({cmd}) :\n{ex.Message}", "ClaudeVS",
+                    OLEMSGICON.OLEMSGICON_CRITICAL, OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
+                return;
+            }
             package.Log.Info($"Claude lancé : {cmd} (cwd {cwd})");
         }
 

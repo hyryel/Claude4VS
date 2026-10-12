@@ -52,27 +52,11 @@ namespace ClaudeVS
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
             switch (name)
             {
-                case "formatDocument": return IdeTools.Json(FormatDocument(Resolve((string)args["file"]), closeIfNotOpen: false));
+                case "formatDocument": return IdeTools.Json(FormatDocument(PathResolver.Resolve((string)args["file"], mustExist: true), closeIfNotOpen: false));
                 case "bookmarkList": return IdeTools.Json(new JObject { ["bookmarks"] = ListBookmarks() });
-                case "bookmarkToggle": return BookmarkToggle(Resolve((string)args["file"]), (int?)args["line"] ?? 0);
+                case "bookmarkToggle": return BookmarkToggle(PathResolver.Resolve((string)args["file"], mustExist: true), (int?)args["line"] ?? 0);
                 default: throw new InvalidOperationException("Unknown tool: " + name);
             }
-        }
-
-        private string Resolve(string file)
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            if (string.IsNullOrEmpty(file)) throw new ArgumentException("file is required");
-            if (!Path.IsPathRooted(file))
-            {
-                var sln = Dte.Solution?.FullName;
-                var project = Dte.Solution?.Projects.Cast<Project>().FirstOrDefault(p => !string.IsNullOrEmpty(p.FullName))?.FullName;
-                var baseDir = Path.GetDirectoryName(!string.IsNullOrEmpty(sln) ? sln : project ?? "");
-                if (!string.IsNullOrEmpty(baseDir)) file = Path.Combine(baseDir, file);
-            }
-            file = Path.GetFullPath(file);
-            if (!File.Exists(file)) throw new FileNotFoundException("File not found: " + file);
-            return file;
         }
 
         private Document FindDocument(string path)
@@ -135,11 +119,10 @@ namespace ClaudeVS
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (line < 1) throw new ArgumentException("line must be >= 1");
-            var wasOpen = FindDocument(path) != null;
             VsShellUtilities.OpenDocument(_package, path, Guid.Empty, out _, out _, out var frame, out IVsTextView view);
+            if (view == null) throw new InvalidOperationException("Not a text document (bookmarks need a text editor): " + path);
             frame?.Show();
             view.SetCaretPos(line - 1, 0);
-            var before = HasBookmarkAt(path, line);
             Dte.ExecuteCommand("Edit.ToggleBookmark");
             var after = HasBookmarkAt(path, line);
             return IdeTools.Json(new JObject
@@ -181,32 +164,37 @@ namespace ClaudeVS
 
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             (string path, int line)? first = null;
-            for (var i = 0; i < 500; i++)
+            try
             {
-                try { Dte.ExecuteCommand("Edit.NextBookmark"); }
-                catch { break; } // commande indisponible : aucun document, pas de signet
-                var doc = Dte.ActiveDocument;
-                if (doc == null || !(doc.Selection is TextSelection sel)) break;
-                var key = (doc.FullName, sel.ActivePoint.Line);
-                if (first == null)
+                for (var i = 0; i < 500; i++)
                 {
-                    // Position inchangée après NextBookmark : zéro signet, ou un seul sous le curseur
-                    if (key.FullName == startPath && key.Line == startLine && !HasBookmarkAt(doc.FullName, key.Line)) break;
-                    first = key;
+                    try { Dte.ExecuteCommand("Edit.NextBookmark"); }
+                    catch { break; } // commande indisponible : aucun document, pas de signet
+                    var doc = Dte.ActiveDocument;
+                    if (doc == null || !(doc.Selection is TextSelection sel)) break;
+                    var key = (doc.FullName, sel.ActivePoint.Line);
+                    if (first == null)
+                    {
+                        // Position inchangée après NextBookmark : zéro signet, ou un seul sous le curseur
+                        if (key.FullName == startPath && key.Line == startLine && !HasBookmarkAt(doc.FullName, key.Line)) break;
+                        first = key;
+                    }
+                    else if (key == first.Value) break;
+                    if (!seen.Add(key.FullName + ":" + key.Line)) break;
+                    var lineText = sel.ActivePoint.CreateEditPoint().GetLines(key.Line, key.Line + 1).Trim();
+                    result.Add(new JObject { ["file"] = doc.FullName, ["line"] = key.Line, ["text"] = lineText });
                 }
-                else if (key == first.Value) break;
-                if (!seen.Add(key.FullName + ":" + key.Line)) break;
-                var lineText = sel.ActivePoint.CreateEditPoint().GetLines(key.Line, key.Line + 1).Trim();
-                result.Add(new JObject { ["file"] = doc.FullName, ["line"] = key.Line, ["text"] = lineText });
             }
-
-            // Restauration : documents ouverts par le parcours refermés, document de départ réactivé
-            foreach (var d in Dte.Documents.Cast<Document>().ToList())
-                if (!openBefore.Contains(d.FullName) && d.Saved) d.Close(vsSaveChanges.vsSaveChangesNo);
-            if (startPath != null && FindDocument(startPath) is Document sd)
+            finally
             {
-                sd.Activate();
-                if (startLine > 0 && sd.Selection is TextSelection s) s.MoveToLineAndOffset(startLine, 1);
+                // Restauration même en cas d'erreur : documents ouverts par le parcours refermés, document de départ réactivé
+                foreach (var d in Dte.Documents.Cast<Document>().ToList())
+                    if (!openBefore.Contains(d.FullName) && d.Saved) d.Close(vsSaveChanges.vsSaveChangesNo);
+                if (startPath != null && FindDocument(startPath) is Document sd)
+                {
+                    sd.Activate();
+                    if (startLine > 0 && sd.Selection is TextSelection s) s.MoveToLineAndOffset(startLine, 1);
+                }
             }
             return new JArray(result.OrderBy(b => (string)b["file"], StringComparer.OrdinalIgnoreCase).ThenBy(b => (int)b["line"]));
         }

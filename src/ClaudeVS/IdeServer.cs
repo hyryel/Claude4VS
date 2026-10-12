@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Fleck;
 using Newtonsoft.Json;
@@ -22,6 +24,8 @@ namespace ClaudeVS
         private readonly object _gate = new object();
         private WebSocketServer _server;
         private IWebSocketConnection _client;
+        // Connexions authentifiées (jeton vérifié), avec une source d'annulation déclenchée à leur fermeture
+        private readonly Dictionary<IWebSocketConnection, CancellationTokenSource> _connections = new Dictionary<IWebSocketConnection, CancellationTokenSource>();
         private string[] _workspaceFolders = new string[0];
         private JObject _lastSelection;
 
@@ -108,15 +112,31 @@ namespace ClaudeVS
                     var lockInfo = JObject.Parse(File.ReadAllText(file));
                     if ((string)lockInfo["ideName"] != "Visual Studio") continue;
                     var pid = (int?)lockInfo["pid"] ?? 0;
-                    var alive = false;
-                    try { alive = pid > 0 && !Process.GetProcessById(pid).HasExited; } catch (ArgumentException) { }
-                    if (!alive)
-                    {
-                        File.Delete(file);
-                        _log.Info("Fichier de verrou périmé supprimé : " + Path.GetFileName(file));
-                    }
+                    if (pid > 0 && IsDevenvAlive(pid)) continue;
+                    File.Delete(file);
+                    _log.Info("Fichier de verrou périmé supprimé : " + Path.GetFileName(file));
                 }
                 catch (Exception ex) { _log.Info($"Fichier de verrou illisible {Path.GetFileName(file)} : {ex.Message}"); }
+            }
+        }
+
+        /// <summary>
+        /// Le PID du verrou désigne-t-il encore un Visual Studio ? Un PID réutilisé par un autre programme, ou
+        /// par un processus d'un autre utilisateur (accès refusé), n'est pas le nôtre : le verrou est périmé.
+        /// </summary>
+        private bool IsDevenvAlive(int pid)
+        {
+            try
+            {
+                using (var process = Process.GetProcessById(pid))
+                    return string.Equals(process.ProcessName, "devenv", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (ArgumentException) { return false; } // aucun processus avec ce PID
+            catch (InvalidOperationException) { return false; } // terminé entre-temps
+            catch (Win32Exception ex)
+            {
+                _log.Info($"Processus {pid} inaccessible ({ex.Message}) : verrou considéré périmé.");
+                return false;
             }
         }
 
@@ -141,9 +161,7 @@ namespace ClaudeVS
         {
             socket.OnOpen = () =>
             {
-                var token = socket.ConnectionInfo.Headers
-                    .FirstOrDefault(h => string.Equals(h.Key, "x-claude-code-ide-authorization", StringComparison.OrdinalIgnoreCase)).Value;
-                if (token != _authToken)
+                if (!Authenticate(socket, out _))
                 {
                     _log.Error("Connexion WebSocket refusée (jeton invalide).");
                     socket.Close();
@@ -169,20 +187,62 @@ namespace ClaudeVS
             };
             socket.OnClose = () =>
             {
+                CancellationTokenSource cts;
                 lock (_gate)
                 {
+                    if (_connections.TryGetValue(socket, out cts)) _connections.Remove(socket);
                     if (_client == socket)
                     {
                         _client = null;
                         _log.Info("Claude Code déconnecté.");
                     }
                 }
+                // Les outils encore en cours pour cette connexion (Roslyn…) n'ont plus de destinataire
+                if (cts != null) try { cts.Cancel(); cts.Dispose(); } catch { }
             };
-            socket.OnMessage = message => _ = HandleMessageAsync(socket, message);
+            socket.OnMessage = message => _ = HandleMessageSafeAsync(socket, message);
+        }
+
+        /// <summary>
+        /// Vérifie le jeton de la connexion et mémorise le résultat. Dans Fleck, OnOpen est appelé dans le
+        /// rappel d'envoi du handshake pendant que la lecture continue : un message peut être traité avant
+        /// (ou sans) OnOpen, d'où la vérification à chaque message et non seulement à l'ouverture.
+        /// </summary>
+        private bool Authenticate(IWebSocketConnection socket, out CancellationToken ct)
+        {
+            lock (_gate)
+            {
+                if (_connections.TryGetValue(socket, out var known)) { ct = known.Token; return true; }
+            }
+            ct = CancellationToken.None;
+            if (!socket.IsAvailable) return false; // déjà fermée : ne pas la réinscrire après OnClose
+            var token = socket.ConnectionInfo.Headers
+                .FirstOrDefault(h => string.Equals(h.Key, "x-claude-code-ide-authorization", StringComparison.OrdinalIgnoreCase)).Value;
+            if (token != _authToken) return false;
+            lock (_gate)
+            {
+                if (!socket.IsAvailable) return false; // fermée entre-temps : OnClose a déjà pu passer, ne pas réinscrire
+                if (!_connections.TryGetValue(socket, out var cts)) _connections[socket] = cts = new CancellationTokenSource();
+                ct = cts.Token;
+            }
+            return true;
+        }
+
+        /// <summary>Les fautes d'une tâche « fire and forget » ne seraient observées par personne : on les journalise.</summary>
+        private async Task HandleMessageSafeAsync(IWebSocketConnection socket, string message)
+        {
+            try { await HandleMessageAsync(socket, message); }
+            catch (Exception ex) { _log.Error("Traitement d'un message WebSocket : " + ex); }
         }
 
         private async Task HandleMessageAsync(IWebSocketConnection socket, string message)
         {
+            if (!Authenticate(socket, out var ct))
+            {
+                _log.Error("Message reçu sur une connexion non authentifiée : fermeture.");
+                try { socket.Close(); } catch { }
+                return;
+            }
             JObject request;
             try { request = JObject.Parse(message); }
             catch (Exception ex) { _log.Error("JSON invalide : " + ex.Message); return; }
@@ -205,7 +265,7 @@ namespace ClaudeVS
             JObject response;
             try
             {
-                var result = await DispatchAsync(method, request["params"] as JObject ?? new JObject(), IsToolsClient(socket));
+                var result = await DispatchAsync(method, request["params"] as JObject ?? new JObject(), IsToolsClient(socket), ct);
                 response = new JObject { ["jsonrpc"] = "2.0", ["id"] = id, ["result"] = result };
             }
             catch (MethodNotFoundException)
@@ -240,7 +300,7 @@ namespace ClaudeVS
             "getDiagnostics", "getOpenEditors", "getWorkspaceFolders", "getCurrentSelection", "openFile", "checkDocumentDirty", "saveDocument",
         };
 
-        private async Task<JToken> DispatchAsync(string method, JObject p, bool toolsOnly)
+        private async Task<JToken> DispatchAsync(string method, JObject p, bool toolsOnly, CancellationToken ct)
         {
             switch (method)
             {
@@ -262,7 +322,7 @@ namespace ClaudeVS
                     var name = (string)p["name"];
                     _log.Info($"← tools/call {name}{(toolsOnly ? " (panneau)" : "")}");
                     if (toolsOnly && !ModelTools.Contains(name)) throw new InvalidOperationException("Unknown tool: " + name);
-                    return await _tools.CallAsync(name, p["arguments"] as JObject ?? new JObject());
+                    return await _tools.CallAsync(name, p["arguments"] as JObject ?? new JObject(), ct);
                 case "resources/list":
                     return new JObject { ["resources"] = new JArray() };
                 case "prompts/list":
@@ -296,6 +356,9 @@ namespace ClaudeVS
         {
             _log.Info("Arrêt du serveur MCP.");
             DeleteLockFile();
+            List<CancellationTokenSource> pending;
+            lock (_gate) { pending = _connections.Values.ToList(); _connections.Clear(); }
+            foreach (var cts in pending) try { cts.Cancel(); cts.Dispose(); } catch { }
             try { _client?.Close(); } catch { }
             try { _server?.Dispose(); } catch { }
         }
