@@ -21,22 +21,30 @@ namespace ClaudeVS.Chat
         private string[] _files = new string[0];   // chemins relatifs, séparateur '/'
         private DateTime _builtAt = DateTime.MinValue;
         private Task _building;
+        private string _buildingRoot;              // dossier de la construction en cours (ou de la dernière lancée)
+
+        private static bool SameRoot(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
         public async Task<IReadOnlyList<string>> SearchAsync(string root, string query, int max = 30)
         {
             Task building;
             lock (_gate)
             {
-                var stale = !string.Equals(root, _root, StringComparison.OrdinalIgnoreCase) || DateTime.UtcNow - _builtAt > MaxAge;
-                if (stale && (_building == null || _building.IsCompleted))
+                var stale = !SameRoot(root, _root) || DateTime.UtcNow - _builtAt > MaxAge;
+                var buildingThisRoot = _building != null && !_building.IsCompleted && SameRoot(root, _buildingRoot);
+                // Dossier changé pendant une construction : on en lance une pour le nouveau dossier (l'ancienne ne publiera pas)
+                if (stale && !buildingThisRoot)
+                {
+                    _buildingRoot = root;
                     _building = Task.Run(() => Build(root));
-                building = string.Equals(root, _root, StringComparison.OrdinalIgnoreCase) ? null : _building;
+                }
+                building = SameRoot(root, _root) ? null : _building;
             }
             // Premier appel pour ce dossier : on attend l'index ; ensuite on répond avec l'ancien pendant le rafraîchissement
             if (building != null) await building;
 
             string[] files;
-            lock (_gate) files = _files;
+            lock (_gate) files = SameRoot(root, _root) ? _files : new string[0];
             return Rank(files, query ?? "", max);
         }
 
@@ -61,6 +69,7 @@ namespace ClaudeVS.Chat
             result.Sort(StringComparer.OrdinalIgnoreCase);
             lock (_gate)
             {
+                if (!SameRoot(root, _buildingRoot)) return; // une construction plus récente porte sur un autre dossier
                 _root = root;
                 _files = result.ToArray();
                 _builtAt = DateTime.UtcNow;

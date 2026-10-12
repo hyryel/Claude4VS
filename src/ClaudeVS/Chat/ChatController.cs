@@ -7,6 +7,7 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Task = System.Threading.Tasks.Task;
 
 namespace ClaudeVS.Chat
 {
@@ -26,6 +27,14 @@ namespace ClaudeVS.Chat
             "runTests", "formatDocument", "bookmarkList", "bookmarkToggle",
             "findSymbol", "symbolInfo", "findReferences", "documentSymbols", "semanticDiagnostics", // renameSymbol demande confirmation
         };
+
+        // Valeurs acceptées de l'interface (elles finissent sur la ligne de commande du CLI)
+        private static readonly string[] PermissionModes = { "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk" };
+        private static readonly string[] EffortLevels = { "low", "medium", "high", "xhigh", "max" };
+        private static readonly Regex ModelPattern = new Regex(@"^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,199}$");
+
+        private const int HistoryBatchSize = 50;        // messages par lot envoyé au panneau
+        private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(30);
 
         /// <summary>
         /// Consigne ajoutée au prompt système : les outils de l'IDE sont moins coûteux et plus fiables que
@@ -55,12 +64,17 @@ namespace ClaudeVS.Chat
         private string _model;            // null = modèle par défaut du CLI
         private string _effort;           // null = effort par défaut du modèle
         private readonly Dictionary<string, Action<JObject>> _pendingControl = new Dictionary<string, Action<JObject>>();
+        // tool_use_id des outils d'édition vus dans les messages assistant du tour : seuls leurs résultats déclenchent le formatage auto
+        private readonly HashSet<string> _editToolUses = new HashSet<string>();
         private string _permissionMode = "default";
         private bool _attachSelection = true;
         private bool _autoFormat;                 // Ctrl+K Ctrl+D après chaque fichier modifié par Claude
         private bool _autoAnalyzeExceptions = true; // arrêt sur exception dans VS → analyse demandée à Claude
         private JObject _lastExceptionState;
         private bool _busy;
+        private bool _cliReady;                   // system/init reçu du processus courant
+        private string _mcpConfigPath;            // fichier temporaire contenant le jeton du serveur MCP
+        private int _restartSeq;                  // invalide un chargement d'historique dépassé par un autre Restart
 
         public ChatController(ClaudeVSPackage package, Action<JObject> post)
         {
@@ -70,9 +84,42 @@ namespace ClaudeVS.Chat
             DebugMonitor.BreakOnException += OnExceptionBreak;
         }
 
+        // ---- Exécution protégée sur le thread UI --------------------------------------------
+
+        /// <summary>
+        /// Bascule sur le thread UI et exécute le corps sous try/catch : une exception est journalisée avec sa pile
+        /// et signalée dans le chat, au lieu de partir dans la télémétrie de VS en laissant le panneau figé.
+        /// </summary>
+        private void RunOnUi(Func<Task> body, string name)
+        {
+            _package.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+                try { await body(); }
+                catch (Exception ex)
+                {
+                    _package.Log.Error(name + " : " + ex);
+                    PostError($"Erreur interne ({name}) : {ex.Message}");
+                }
+            }).FileAndForget("ClaudeVS/" + name);
+        }
+
+        private void RunOnUi(Action body, string name) => RunOnUi(() => { body(); return Task.CompletedTask; }, name);
+
         // ---- Messages venant de l'interface -----------------------------------------------
 
         public void HandleUiMessage(JObject msg)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            try { DispatchUiMessage(msg); }
+            catch (Exception ex)
+            {
+                _package.Log.Error($"Message de l'interface ({msg["type"]}) : {ex}");
+                PostError($"Erreur interne ({msg["type"]}) : {ex.Message}");
+            }
+        }
+
+        private void DispatchUiMessage(JObject msg)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             switch ((string)msg["type"])
@@ -81,6 +128,9 @@ namespace ClaudeVS.Chat
                     PostStatus(_claude?.IsRunning == true ? (_busy ? "busy" : "ready") : "idle");
                     PostSettings();
                     OnSelectionChanged(SelectionTracker.Latest);
+                    // Interface rechargée (plantage WebView2) : les demandes de permission encore ouvertes sont réaffichées
+                    foreach (var kv in _pendingPermissions)
+                        _post(new JObject { ["type"] = "cli", ["msg"] = new JObject { ["type"] = "control_request", ["request_id"] = kv.Key, ["request"] = kv.Value } });
                     break;
                 case "send":
                     Send((string)msg["text"], msg["images"] as JArray);
@@ -89,7 +139,8 @@ namespace ClaudeVS.Chat
                     SearchFiles((string)msg["query"], (int?)msg["seq"] ?? 0);
                     break;
                 case "interrupt":
-                    _claude?.SendControlRequest(new JObject { ["subtype"] = "interrupt" });
+                    // Réponse consommée ici : un refus du CLI (tour déjà terminé) n'a pas à s'afficher en erreur
+                    Control(new JObject { ["subtype"] = "interrupt" }, _ => { });
                     break;
                 case "permission":
                     ResolvePermission((string)msg["requestId"], (JObject)msg["response"]);
@@ -99,29 +150,41 @@ namespace ClaudeVS.Chat
                     if (_pendingPermissions.TryGetValue(req, out var request)) ShowEditDiff(req, request);
                     break;
                 case "setMode":
-                    _permissionMode = (string)msg["mode"] ?? "default";
-                    _claude?.SendControlRequest(new JObject { ["subtype"] = "set_permission_mode", ["mode"] = _permissionMode });
+                {
+                    var mode = (string)msg["mode"] ?? "default";
+                    if (!PermissionModes.Contains(mode)) { RejectSetting("mode", mode); break; }
+                    _permissionMode = mode;
+                    TrySend(() => _claude?.SendControlRequest(new JObject { ["subtype"] = "set_permission_mode", ["mode"] = _permissionMode }));
                     PostSettings();
                     break;
+                }
                 case "setModel":
-                    _model = string.IsNullOrEmpty((string)msg["model"]) ? null : (string)msg["model"];
-                    _claude?.SendControlRequest(new JObject { ["subtype"] = "set_model", ["model"] = _model });
+                {
+                    var model = (string)msg["model"];
+                    if (!string.IsNullOrEmpty(model) && !ModelPattern.IsMatch(model)) { RejectSetting("modèle", model); break; }
+                    _model = string.IsNullOrEmpty(model) ? null : model;
+                    TrySend(() => _claude?.SendControlRequest(new JObject { ["subtype"] = "set_model", ["model"] = _model }));
                     PostSettings();
                     break;
+                }
                 case "setEffort":
-                    _effort = string.IsNullOrEmpty((string)msg["effort"]) ? null : (string)msg["effort"];
+                {
+                    var effort = (string)msg["effort"];
+                    if (!string.IsNullOrEmpty(effort) && !EffortLevels.Contains(effort)) { RejectSetting("effort", effort); break; }
+                    _effort = string.IsNullOrEmpty(effort) ? null : effort;
                     // À chaud : réglage de session (non persisté) ; au démarrage : --effort
                     if (_effort != null)
-                        _claude?.SendControlRequest(new JObject
+                        TrySend(() => _claude?.SendControlRequest(new JObject
                         {
                             ["subtype"] = "apply_flag_settings",
                             ["settings"] = new JObject { ["effortLevel"] = _effort },
-                        });
+                        }));
+                    else if (_claude?.IsRunning == true)
+                        // Le CLI n'a pas de requête pour revenir à l'effort par défaut : il garde le réglage précédent
+                        PostNotice("Effort par défaut : s'appliquera à la prochaine conversation (la session en cours garde l'effort actuel).");
                     PostSettings();
                     break;
-                case "contextUsage":
-                    RequestContextUsage();
-                    break;
+                }
                 case "rewind":
                     Rewind((string)msg["uuid"], (bool?)msg["dryRun"] ?? false);
                     break;
@@ -144,7 +207,7 @@ namespace ClaudeVS.Chat
                     Restart(null);
                     break;
                 case "listSessions":
-                    _post(new JObject { ["type"] = "sessions", ["sessions"] = SessionStore.List(WorkingDirectory()) });
+                    ListSessions();
                     break;
                 case "resume":
                     Restart((string)msg["sessionId"]);
@@ -153,6 +216,14 @@ namespace ClaudeVS.Chat
                     OpenFile((string)msg["path"], (int?)msg["line"]);
                     break;
             }
+        }
+
+        /// <summary>Valeur inattendue venant de l'interface : refusée, et les réglages réels sont renvoyés pour resynchroniser les sélecteurs.</summary>
+        private void RejectSetting(string what, string value)
+        {
+            var shown = value.Length > 60 ? value.Substring(0, 60) + "…" : value;
+            PostError($"Valeur de {what} refusée : « {shown} ».");
+            PostSettings();
         }
 
         private void Send(string text, JArray images)
@@ -174,9 +245,29 @@ namespace ClaudeVS.Chat
                     });
             if (!string.IsNullOrWhiteSpace(text))
                 content.Add(new JObject { ["type"] = "text", ["text"] = text });
-            _claude.SendUserMessage(content);
+            // busy seulement si la mise en file a réussi : sinon l'erreur est affichée et le statut reste cohérent
+            if (!TrySend(() => _claude.SendUserMessage(content))) return;
             _busy = true;
             PostStatus("busy");
+        }
+
+        /// <summary>Envoi vers le CLI ; un échec (pipe fermé) est affiché et traité comme une mort du processus.</summary>
+        private bool TrySend(Action send)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            try { send(); return true; }
+            catch (Exception ex) { HandleWriteFailure(_claude, ex); return false; }
+        }
+
+        private void HandleWriteFailure(ClaudeProcess source, Exception ex)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (source == null || source != _claude) return;
+            _package.Log.Error("Envoi vers claude : " + ex);
+            var stderr = source.StderrTail;
+            PostError($"Envoi vers claude impossible : {ex.Message}{(string.IsNullOrWhiteSpace(stderr) ? "" : "\n" + stderr.Trim())}");
+            StopProcess();
+            PostStatus("idle");
         }
 
         private readonly FileIndex _files = new FileIndex();
@@ -185,11 +276,11 @@ namespace ClaudeVS.Chat
         private void SearchFiles(string query, int seq)
         {
             var root = WorkingDirectory();
-            _package.JoinableTaskFactory.RunAsync(async () =>
+            RunOnUi(async () =>
             {
                 var files = await _files.SearchAsync(root, query);
                 _post(new JObject { ["type"] = "files", ["seq"] = seq, ["files"] = new JArray(files) });
-            }).FileAndForget("ClaudeVS/files");
+            }, "files");
         }
 
         /// <summary>Insère une @-mention dans la zone de saisie (commande « Envoyer la sélection à Claude »).</summary>
@@ -209,6 +300,8 @@ namespace ClaudeVS.Chat
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (_claude?.IsRunning == true) return true;
+            // Processus mort dont la sortie n'a pas encore été traitée : on libère tout avant de relancer
+            if (_claude != null) StopProcess();
 
             var cmd = ClaudeLauncher.FindClaude();
             if (cmd == null)
@@ -239,49 +332,99 @@ namespace ClaudeVS.Chat
                 args.AddRange(new[] { "--allowedTools", string.Join(",", ReadOnlyVsTools.Select(t => "mcp__visualstudio__" + t)) });
             }
 
+            ClaudeProcess claude = null;
             try
             {
                 // Sauvegarde des fichiers avant chaque modification, pour le retour arrière
                 var env = new Dictionary<string, string> { ["CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"] = "true" };
                 _package.Log.Info("CLI : " + cmd);
-                var claude = new ClaudeProcess(cmd.FileName, WorkingDirectory(), args, env, _package.Log);
+                claude = new ClaudeProcess(cmd.FileName, WorkingDirectory(), args, env, _package.Log);
                 claude.MessageReceived += m => OnCliMessage(claude, m);
                 claude.Exited += (code, stderr) => OnCliExited(claude, code, stderr);
+                claude.WriteFailed += ex => RunOnUi(() => HandleWriteFailure(claude, ex), "write");
                 _claude = claude;
+                _cliReady = false;
                 claude.SendControlRequest(new JObject { ["subtype"] = "initialize" });
                 PostStatus("starting");
+                WatchStartup(claude);
                 return true;
             }
             catch (Exception ex)
             {
+                _package.Log.Error("Lancement de claude : " + ex);
                 PostError("Impossible de lancer claude : " + ex.Message);
+                if (_claude == claude) StopProcess();
+                else claude?.Dispose();
                 return false;
             }
+        }
+
+        /// <summary>Si le CLI n'a pas répondu à initialize au bout de 30 s, on le dit plutôt que de laisser « Démarrage… » sans fin.</summary>
+        private void WatchStartup(ClaudeProcess claude)
+        {
+            RunOnUi(async () =>
+            {
+                await Task.Delay(StartupTimeout);
+                if (claude != _claude || _cliReady || !claude.IsRunning) return;
+                PostNotice($"claude ne répond pas depuis {StartupTimeout.TotalSeconds:0} s (initialisation en attente). "
+                         + "Vérifiez le volet Sortie « Claude » ; « Nouvelle conversation » relance le processus.");
+            }, "startup");
         }
 
         private void Restart(string resumeSessionId)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
+            var seq = ++_restartSeq;
             StopProcess();
             _post(new JObject { ["type"] = "cleared" });
-            if (resumeSessionId != null)
+            PostStatus("idle"); // y compris pendant le chargement d'un historique : pas de « Claude travaille… » résiduel
+            if (resumeSessionId == null) return;
+
+            var cwd = WorkingDirectory();
+            RunOnUi(async () =>
             {
-                _post(new JObject { ["type"] = "history", ["messages"] = SessionStore.Load(WorkingDirectory(), resumeSessionId) });
-                EnsureStarted(resumeSessionId);
-            }
-            else PostStatus("idle");
+                // Lecture du .jsonl hors thread UI : les sessions font facilement plusieurs dizaines de Mo
+                var messages = await Task.Run(() => SessionStore.Load(cwd, resumeSessionId, _package.Log));
+                if (seq != _restartSeq) return; // une autre conversation a été lancée entre-temps
+                // Par lots, pour ne pas sérialiser un seul message WebView géant ; « last » marque le dernier
+                for (var i = 0; i < messages.Count || i == 0; i += HistoryBatchSize)
+                {
+                    var batch = new JArray(messages.Skip(i).Take(HistoryBatchSize));
+                    var last = i + HistoryBatchSize >= messages.Count;
+                    _post(new JObject { ["type"] = "history", ["messages"] = batch, ["last"] = last });
+                }
+                if (_claude != null)
+                {
+                    // Un message envoyé pendant le chargement a déjà lancé un processus, sans --resume
+                    PostNotice("Un message a été envoyé pendant le chargement : la conversation affichée n'a pas été reprise par le CLI. Rouvrez-la depuis l'historique pour la poursuivre.");
+                    return;
+                }
+                if (!EnsureStarted(resumeSessionId)) PostStatus("idle");
+            }, "resume");
+        }
+
+        private void ListSessions()
+        {
+            var cwd = WorkingDirectory();
+            RunOnUi(async () =>
+            {
+                var sessions = await Task.Run(() => SessionStore.List(cwd, _package.Log));
+                _post(new JObject { ["type"] = "sessions", ["sessions"] = sessions });
+            }, "sessions");
         }
 
         private void StopProcess()
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             var old = _claude;
             _claude = null;
             _busy = false;
-            foreach (var id in _pendingPermissions.Keys.ToList())
-                DiffManager.GetInstance(_package).Close(DiffTab(id));
-            _pendingPermissions.Clear();
+            _cliReady = false;
+            ClearPendingPermissions();
             _pendingControl.Clear();
+            _editToolUses.Clear();
             old?.Dispose();
+            DeleteIdeMcpConfig();
         }
 
         /// <summary>
@@ -309,30 +452,41 @@ namespace ClaudeVS.Chat
                 },
             };
             File.WriteAllText(path, config.ToString(Formatting.None));
+            _mcpConfigPath = path;
             return path;
+        }
+
+        /// <summary>Le fichier contient le jeton du serveur : il ne survit pas au processus.</summary>
+        private void DeleteIdeMcpConfig()
+        {
+            var path = _mcpConfigPath;
+            _mcpConfigPath = null;
+            if (path == null) return;
+            try { File.Delete(path); }
+            catch (Exception ex) { _package.Log.Info($"Suppression de {path} : {ex.Message}"); }
         }
 
         // ---- Messages venant du CLI (thread d'arrière-plan) --------------------------------
 
         private void OnCliMessage(ClaudeProcess source, JObject msg)
         {
-            _package.JoinableTaskFactory.RunAsync(async () =>
+            RunOnUi(() =>
             {
-                await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
                 if (source != _claude) return; // message d'un processus déjà remplacé
 
                 var type = (string)msg["type"];
+                string editRequestId = null;
                 if (type == "control_request" && (string)msg["request"]?["subtype"] == "can_use_tool")
                 {
                     var id = (string)msg["request_id"];
-                    _pendingPermissions[id] = (JObject)msg["request"];
-                    if (EditTools.Contains((string)msg["request"]["tool_name"]))
-                        ShowEditDiff(id, (JObject)msg["request"]);
+                    var request = (JObject)msg["request"];
+                    _pendingPermissions[id] = request;
+                    if (EditTools.Contains((string)request["tool_name"])) editRequestId = id;
                 }
                 else if (type == "control_request")
                 {
                     // Requête non gérée (hook_callback, elicitation…) : on répond une erreur pour ne pas bloquer le CLI
-                    source.Send(new JObject
+                    TrySend(() => source.Send(new JObject
                     {
                         ["type"] = "control_response",
                         ["response"] = new JObject
@@ -340,22 +494,32 @@ namespace ClaudeVS.Chat
                             ["subtype"] = "error", ["request_id"] = msg["request_id"],
                             ["error"] = "Non pris en charge par ClaudeVS",
                         },
-                    });
+                    }));
                     return;
+                }
+                else if (type == "control_cancel_request")
+                {
+                    // Le CLI retire une demande (tour interrompu…) : la carte et le diff n'ont plus d'objet
+                    var id = (string)msg["request_id"];
+                    if (id != null) CancelPermission(id);
                 }
                 else if (type == "control_response")
                 {
-                    var response = (JObject)msg["response"];
+                    var response = msg["response"] as JObject;
                     var id = (string)response?["request_id"];
+                    if (!_busy) PostStatus("ready");
                     if (id != null && _pendingControl.TryGetValue(id, out var handler))
                     {
                         _pendingControl.Remove(id);
+                        // Le gestionnaire produit son propre message vers l'interface (rewindPreview, context…) :
+                        // pas de relais brut, sinon une erreur s'afficherait deux fois
                         handler(response);
+                        return;
                     }
-                    if (!_busy) PostStatus("ready");
                 }
                 else if (type == "system" && (string)msg["subtype"] == "init")
                 {
+                    _cliReady = true;
                     if (!_busy) PostStatus("ready");
                     RequestContextUsage();
                 }
@@ -368,17 +532,38 @@ namespace ClaudeVS.Chat
                 else if (type == "result")
                 {
                     _busy = false;
+                    // Les permissions encore ouvertes ne recevront plus de réponse du CLI
+                    ClearPendingPermissions();
+                    _editToolUses.Clear();
                     PostStatus("ready");
                     RequestContextUsage();
                 }
-                else if (type == "user" && _autoFormat && msg["tool_use_result"]?["filePath"] is JValue fp)
+                else if (type == "assistant")
                 {
-                    // Fichier écrit par Claude (Edit/Write) : passage de Mettre en forme le document
-                    AutoFormat((string)fp);
+                    TrackEditToolUses(msg["message"]?["content"] as JArray);
+                }
+                else if (type == "user" && msg["tool_use_result"]?["filePath"] is JValue fp)
+                {
+                    // Fichier écrit par Claude (Edit/Write/MultiEdit) : passage de Mettre en forme le document
+                    var results = msg["message"]?["content"] as JArray;
+                    var block = results?.FirstOrDefault(c => (string)c["type"] == "tool_result");
+                    var toolUseId = (string)block?["tool_use_id"];
+                    if (toolUseId != null && _editToolUses.Remove(toolUseId) && _autoFormat && (bool?)block["is_error"] != true)
+                        AutoFormat((string)fp);
                 }
 
+                // Relais avant tout traitement faillible : la carte de permission doit s'afficher même si le diff échoue
                 _post(new JObject { ["type"] = "cli", ["msg"] = msg });
-            }).FileAndForget("ClaudeVS/cli");
+                if (editRequestId != null) ShowEditDiff(editRequestId, _pendingPermissions[editRequestId]);
+            }, "cli");
+        }
+
+        private void TrackEditToolUses(JArray content)
+        {
+            if (content == null) return;
+            foreach (var c in content)
+                if ((string)c["type"] == "tool_use" && EditTools.Contains((string)c["name"]) && (string)c["id"] is string id)
+                    _editToolUses.Add(id);
         }
 
         private void AutoFormat(string path)
@@ -387,7 +572,7 @@ namespace ClaudeVS.Chat
             try
             {
                 var r = _package.Tools?.Editor.FormatDocument(path, closeIfNotOpen: true);
-                if (r != null && (bool)r["changed"]) _post(new JObject { ["type"] = "notice", ["text"] = "✨ Formaté : " + Path.GetFileName(path) });
+                if (r != null && (bool?)r["changed"] == true) PostNotice("✨ Formaté : " + Path.GetFileName(path));
             }
             catch (Exception ex) { _package.Log.Info($"Formatage auto de {path} : {ex.Message}"); }
         }
@@ -426,13 +611,15 @@ namespace ClaudeVS.Chat
             return sb.ToString();
         }
 
-        /// <summary>Requête de contrôle dont la réponse est attendue (get_context_usage, rewind_files…).</summary>
-        private void Control(JObject request, Action<JObject> onResponse)
+        /// <summary>Requête de contrôle dont la réponse est attendue (get_context_usage, rewind_files…). Faux si le CLI ne tourne pas ou si l'envoi a échoué.</summary>
+        private bool Control(JObject request, Action<JObject> onResponse)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            if (_claude?.IsRunning != true) return;
-            var id = _claude.SendControlRequest(request);
+            if (_claude?.IsRunning != true) return false;
+            string id = null;
+            if (!TrySend(() => id = _claude.SendControlRequest(request))) return false;
             _pendingControl[id] = onResponse;
+            return true;
         }
 
         /// <summary>Remplissage du contexte : catégories renvoyées par le CLI, résumées en « utilisé / total ».</summary>
@@ -462,7 +649,7 @@ namespace ClaudeVS.Chat
             if (string.IsNullOrEmpty(uuid)) return;
             var request = new JObject { ["subtype"] = "rewind_files", ["user_message_id"] = uuid };
             if (dryRun) request["dry_run"] = true;
-            Control(request, r =>
+            var sent = Control(request, r =>
             {
                 var resp = r["response"] as JObject ?? new JObject();
                 var error = (string)r["error"] ?? (string)resp["error"];
@@ -479,21 +666,28 @@ namespace ClaudeVS.Chat
                 });
                 if (!dryRun) _package.Log.Info($"Retour arrière des fichiers ({uuid}) : {(error ?? "ok")}");
             });
+            // Sans processus, la carte de retour arrière explique pourquoi au lieu d'un bouton muet
+            if (!sent)
+                _post(new JObject
+                {
+                    ["type"] = dryRun ? "rewindPreview" : "rewindDone", ["uuid"] = uuid, ["ok"] = false,
+                    ["error"] = "claude n'est pas démarré : reprenez la conversation (Reprendre) pour restaurer les fichiers.",
+                });
         }
 
         private void OnCliExited(ClaudeProcess source, int code, string stderr)
         {
-            _package.JoinableTaskFactory.RunAsync(async () =>
+            RunOnUi(() =>
             {
-                await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
                 if (source != _claude) return;
-                _claude = null;
-                _busy = false;
-                _pendingPermissions.Clear();
+                var wasBusy = _busy;
+                StopProcess(); // libère Process/StreamWriter, ferme les diffs, expire les permissions
                 PostStatus("idle");
                 if (code != 0)
                     PostError($"claude s'est arrêté (code {code}).{(string.IsNullOrWhiteSpace(stderr) ? "" : "\n" + stderr.Trim())}");
-            }).FileAndForget("ClaudeVS/exit");
+                else if (wasBusy)
+                    PostNotice("claude s'est arrêté avant de terminer sa réponse. Envoyez un nouveau message pour le relancer.");
+            }, "exit");
         }
 
         // ---- Permissions ----------------------------------------------------------------------
@@ -501,39 +695,64 @@ namespace ClaudeVS.Chat
         private void ResolvePermission(string requestId, JObject response)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            if (requestId == null || !_pendingPermissions.TryGetValue(requestId, out var request)) return;
-            _pendingPermissions.Remove(requestId);
-            DiffManager.GetInstance(_package).Close(DiffTab(requestId));
+            if (requestId == null || response == null || !_pendingPermissions.TryGetValue(requestId, out var request)) return;
 
             _package.Log.Info($"→ permission {requestId} : {response["behavior"]}");
             response["toolUseID"] = request["tool_use_id"];
             if ((string)response["behavior"] == "allow" && response["updatedInput"] == null)
                 response["updatedInput"] = request["input"];
-            _claude?.SendControlResponse(requestId, response);
+            // En cas d'échec d'envoi, la demande est encore en attente : HandleWriteFailure la marque « cancelled » avec les autres
+            if (!TrySend(() => _claude?.SendControlResponse(requestId, response))) return;
+            _pendingPermissions.Remove(requestId);
+            DiffManager.GetInstance(_package).Close(DiffTab(requestId));
             _post(new JObject { ["type"] = "permissionResolved", ["requestId"] = requestId, ["behavior"] = response["behavior"] });
+        }
+
+        /// <summary>Demande abandonnée (processus arrêté, tour terminé, annulation du CLI) : ferme le diff et expire la carte.</summary>
+        private void CancelPermission(string requestId)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (!_pendingPermissions.Remove(requestId)) return;
+            DiffManager.GetInstance(_package).Close(DiffTab(requestId));
+            _post(new JObject { ["type"] = "permissionResolved", ["requestId"] = requestId, ["behavior"] = "cancelled" });
+        }
+
+        private void ClearPendingPermissions()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            foreach (var id in _pendingPermissions.Keys.ToList()) CancelPermission(id);
         }
 
         private static string DiffTab(string requestId) => "claude-perm-" + requestId;
 
-        /// <summary>Ouvre la modification proposée dans le diff natif ; Accepter/Refuser y répond à la permission.</summary>
+        /// <summary>
+        /// Ouvre la modification proposée dans le diff natif ; Accepter/Refuser y répond à la permission.
+        /// Un échec (fichier illisible, old_string introuvable…) est signalé : la carte du chat reste utilisable.
+        /// </summary>
         private void ShowEditDiff(string requestId, JObject request)
         {
-            var input = (JObject)request["input"];
+            var input = request["input"] as JObject;
             var tool = (string)request["tool_name"];
             var path = (string)input?["file_path"];
             if (string.IsNullOrEmpty(path)) return;
 
-            string original = File.Exists(path) ? File.ReadAllText(path) : "";
-            string proposed;
-            try { proposed = ApplyEdit(tool, input, original); }
-            catch (Exception ex)
+            RunOnUi(async () =>
             {
-                _package.Log.Info($"Diff indisponible pour {path} : {ex.Message}");
-                return;
-            }
+                string original, proposed;
+                try
+                {
+                    // Le chemin vient du modèle (UNC, fichier verrouillé…) : lecture hors thread UI
+                    original = File.Exists(path) ? await Task.Run(() => File.ReadAllText(path)) : "";
+                    proposed = ApplyEdit(tool, input, original);
+                }
+                catch (Exception ex)
+                {
+                    _package.Log.Info($"Diff indisponible pour {path} : {ex.Message}");
+                    PostNotice($"Diff indisponible pour {Path.GetFileName(path)} : {ex.Message} — répondez depuis la carte du chat.");
+                    return;
+                }
+                if (!_pendingPermissions.ContainsKey(requestId)) return; // décidé ou abandonné pendant la lecture
 
-            _package.JoinableTaskFactory.RunAsync(async () =>
-            {
                 var (accepted, text) = await DiffManager.GetInstance(_package)
                     .ShowProposalAsync(path, path, proposed, DiffTab(requestId));
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -545,19 +764,27 @@ namespace ClaudeVS.Chat
                     var updated = (JObject)input.DeepClone();
                     if (text != null && text != proposed)
                     {
-                        // Retouches de l'utilisateur dans le diff : on les transmet telles quelles
-                        if (tool == "Write") updated["content"] = text;
-                        else if (original.Length > 0)
-                            updated = new JObject { ["file_path"] = path, ["old_string"] = original, ["new_string"] = text, ["replace_all"] = false };
-                        if (tool == "MultiEdit" && original.Length > 0)
-                            updated = new JObject { ["file_path"] = path, ["edits"] = new JArray(new JObject { ["old_string"] = original, ["new_string"] = text }) };
+                        // Retouches de l'utilisateur dans le diff : on les transmet telles quelles, en une seule
+                        // substitution du contenu actuel (old_string vide = création, comme le fait le CLI)
+                        switch (tool)
+                        {
+                            case "Write":
+                                updated["content"] = text;
+                                break;
+                            case "Edit":
+                                updated = new JObject { ["file_path"] = path, ["old_string"] = original, ["new_string"] = text, ["replace_all"] = false };
+                                break;
+                            case "MultiEdit":
+                                updated = new JObject { ["file_path"] = path, ["edits"] = new JArray(new JObject { ["old_string"] = original, ["new_string"] = text }) };
+                                break;
+                        }
                     }
                     response = new JObject { ["behavior"] = "allow", ["updatedInput"] = updated };
                 }
                 else
                     response = new JObject { ["behavior"] = "deny", ["message"] = "L'utilisateur a refusé la modification dans le diff de Visual Studio." };
                 ResolvePermission(requestId, response);
-            }).FileAndForget("ClaudeVS/diff");
+            }, "diff");
         }
 
         private static string ApplyEdit(string tool, JObject input, string original)
@@ -644,6 +871,7 @@ namespace ClaudeVS.Chat
 
         private void PostStatus(string state) => _post(new JObject { ["type"] = "status", ["state"] = state });
         private void PostError(string text) => _post(new JObject { ["type"] = "error", ["text"] = text });
+        private void PostNotice(string text) => _post(new JObject { ["type"] = "notice", ["text"] = text });
 
         private void PostSettings() => _post(new JObject
         {
@@ -668,6 +896,8 @@ namespace ClaudeVS.Chat
     /// <summary>Conversations enregistrées par le CLI dans ~/.claude/projects/&lt;dossier encodé&gt;/*.jsonl.</summary>
     internal static class SessionStore
     {
+        private const int MaxToolResultChars = 20000;
+
         private static string ProjectDir(string cwd)
         {
             var config = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
@@ -676,14 +906,14 @@ namespace ClaudeVS.Chat
             return Path.Combine(config, "projects", Regex.Replace(cwd, "[^A-Za-z0-9]", "-"));
         }
 
-        public static JArray List(string cwd)
+        public static JArray List(string cwd, Log log)
         {
             var result = new JArray();
             var dir = ProjectDir(cwd);
             if (!Directory.Exists(dir)) return result;
             foreach (var file in new DirectoryInfo(dir).GetFiles("*.jsonl").OrderByDescending(f => f.LastWriteTimeUtc).Take(30))
             {
-                var title = FirstPrompt(file.FullName);
+                var title = FirstPrompt(file.FullName, log);
                 if (title == null) continue;
                 result.Add(new JObject
                 {
@@ -695,7 +925,7 @@ namespace ClaudeVS.Chat
             return result;
         }
 
-        private static string FirstPrompt(string file)
+        private static string FirstPrompt(string file, Log log)
         {
             try
             {
@@ -709,7 +939,7 @@ namespace ClaudeVS.Chat
                     return text.Length > 90 ? text.Substring(0, 90) + "…" : text;
                 }
             }
-            catch { }
+            catch (Exception ex) { log?.Info($"Session illisible {Path.GetFileName(file)} : {ex.Message}"); }
             return null;
         }
 
@@ -729,20 +959,43 @@ namespace ClaudeVS.Chat
             return t;
         }
 
-        public static JArray Load(string cwd, string sessionId)
+        /// <summary>Messages user/assistant de la session, résultats d'outils volumineux tronqués (le panneau n'en affiche que 4 000 caractères).</summary>
+        public static JArray Load(string cwd, string sessionId, Log log)
         {
             var result = new JArray();
             var file = Path.Combine(ProjectDir(cwd), sessionId + ".jsonl");
             if (!File.Exists(file)) return result;
-            foreach (var line in ReadLines(file))
+            try
             {
-                var o = TryParse(line);
-                var type = (string)o?["type"];
-                if ((type != "user" && type != "assistant") || (bool?)o["isSidechain"] == true || (bool?)o["isMeta"] == true) continue;
-                result.Add(new JObject { ["type"] = type, ["uuid"] = o["uuid"], ["message"] = o["message"] });
+                foreach (var line in ReadLines(file))
+                {
+                    var o = TryParse(line);
+                    var type = (string)o?["type"];
+                    if ((type != "user" && type != "assistant") || (bool?)o["isSidechain"] == true || (bool?)o["isMeta"] == true) continue;
+                    if (type == "user") TruncateToolResults(o["message"]?["content"] as JArray);
+                    result.Add(new JObject { ["type"] = type, ["uuid"] = o["uuid"], ["message"] = o["message"] });
+                }
             }
+            catch (Exception ex) { log?.Error($"Lecture de la session {sessionId} : {ex.Message}"); }
             return result;
         }
+
+        private static void TruncateToolResults(JArray content)
+        {
+            if (content == null) return;
+            foreach (var block in content.OfType<JObject>())
+            {
+                if ((string)block["type"] != "tool_result") continue;
+                if (block["content"] is JValue v && v.Type == JTokenType.String)
+                    block["content"] = Truncate((string)v);
+                else if (block["content"] is JArray parts)
+                    foreach (var p in parts.OfType<JObject>())
+                        if ((string)p["type"] == "text" && p["text"] is JValue t && t.Type == JTokenType.String) p["text"] = Truncate((string)t);
+            }
+        }
+
+        private static string Truncate(string text) =>
+            text != null && text.Length > MaxToolResultChars ? text.Substring(0, MaxToolResultChars) + "\n… [tronqué]" : text;
 
         private static IEnumerable<string> ReadLines(string file)
         {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -17,21 +18,28 @@ namespace ClaudeVS.Chat
     {
         private readonly Process _process;
         private readonly StreamWriter _stdin;
-        private readonly object _writeGate = new object();
+        // Les écritures passent par un thread dédié : stdin est un pipe de quelques Ko, une image collée
+        // peut faire plusieurs Mo, et le thread UI ne doit jamais attendre que le CLI lise.
+        private readonly BlockingCollection<string> _queue = new BlockingCollection<string>();
+        private readonly JobObject _job;
         private readonly Log _log;
+        private readonly Task _stderrTask;
         private int _requestCounter;
+        private volatile bool _disposed;
 
         /// <summary>Chaque message JSON émis par le CLI (thread d'arrière-plan).</summary>
         public event Action<JObject> MessageReceived;
         /// <summary>Le processus s'est terminé (code de sortie, fin de stderr).</summary>
         public event Action<int, string> Exited;
+        /// <summary>L'écriture vers stdin a échoué (pipe fermé) : le processus est à considérer comme mort.</summary>
+        public event Action<Exception> WriteFailed;
 
         public ClaudeProcess(string exe, string cwd, IEnumerable<string> args, IDictionary<string, string> env, Log log)
         {
             _log = log;
             var psi = new ProcessStartInfo(exe)
             {
-                Arguments = string.Join(" ", Quote(args)),
+                Arguments = CommandLine.Join(args),
                 WorkingDirectory = cwd,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -44,15 +52,24 @@ namespace ClaudeVS.Chat
             foreach (var kv in env) psi.EnvironmentVariables[kv.Key] = kv.Value;
             _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             _process.Start();
+            // Si devenv meurt brutalement, le job emporte le CLI et ses sous-processus
+            _job = JobObject.TryCreateFor(_process, log);
             // net472 n'a pas StandardInputEncoding : on écrit nous-mêmes en UTF-8 sans BOM
             _stdin = new StreamWriter(_process.StandardInput.BaseStream, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
             _log.Info($"claude démarré (pid {_process.Id}) : {psi.Arguments}");
 
+            Task.Factory.StartNew(WriteLoop, TaskCreationOptions.LongRunning);
+            _stderrTask = Task.Run(ReadStderrAsync);
             Task.Run(ReadStdoutAsync);
-            Task.Run(ReadStderrAsync);
         }
 
         private readonly StringBuilder _stderrTail = new StringBuilder();
+
+        /// <summary>Dernières lignes de stderr (pour expliquer une mort du processus).</summary>
+        public string StderrTail
+        {
+            get { lock (_stderrTail) return _stderrTail.ToString(); }
+        }
 
         private async Task ReadStdoutAsync()
         {
@@ -69,14 +86,14 @@ namespace ClaudeVS.Chat
                     catch (Exception ex) { _log.Error("Traitement d'un message CLI : " + ex.Message); }
                 }
             }
-            catch (Exception ex) { _log.Error("Lecture stdout : " + ex.Message); }
+            catch (Exception ex) { if (!_disposed) _log.Error("Lecture stdout : " + ex.Message); }
 
-            try { _process.WaitForExit(); } catch { }
+            try { _process.WaitForExit(); } catch (Exception ex) { if (!_disposed) _log.Info("WaitForExit : " + ex.Message); }
+            // stderr se ferme avec le processus, mais sa lecture peut avoir un temps de retard : on l'attend pour un message complet
+            try { await Task.WhenAny(_stderrTask, Task.Delay(2000)); } catch { }
             int code = -1;
             try { code = _process.ExitCode; } catch { }
-            string tail;
-            lock (_stderrTail) tail = _stderrTail.ToString();
-            Exited?.Invoke(code, tail);
+            Exited?.Invoke(code, StderrTail);
         }
 
         private async Task ReadStderrAsync()
@@ -94,19 +111,43 @@ namespace ClaudeVS.Chat
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { if (!_disposed) _log.Error("Lecture stderr : " + ex.Message); }
+        }
+
+        /// <summary>Thread écrivain : vide la file vers stdin ; un échec ferme la file et remonte par WriteFailed.</summary>
+        private void WriteLoop()
+        {
+            try
+            {
+                foreach (var json in _queue.GetConsumingEnumerable())
+                    _stdin.WriteLine(json);
+            }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                _log.Error("Écriture vers claude : " + ex.Message);
+                try { _queue.CompleteAdding(); } catch { }
+                try { WriteFailed?.Invoke(ex); }
+                catch (Exception ex2) { _log.Error("Traitement d'un échec d'écriture : " + ex2.Message); }
+            }
         }
 
         public bool IsRunning
         {
-            get { try { return !_process.HasExited; } catch { return false; } }
+            get { try { return !_disposed && !_process.HasExited; } catch { return false; } }
         }
 
+        /// <summary>Met le message en file d'envoi ; ne bloque pas. Lève IOException si le processus n'accepte plus rien.</summary>
         public void Send(JObject message)
         {
             var json = message.ToString(Formatting.None);
-            lock (_writeGate)
-                _stdin.WriteLine(json);
+            if (_disposed || _queue.IsAddingCompleted || !IsRunning)
+                throw new IOException("Le processus claude n'accepte plus de messages (arrêté ou entrée fermée).");
+            try { _queue.Add(json); }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is ObjectDisposedException)
+            {
+                throw new IOException("Le processus claude n'accepte plus de messages (entrée fermée).", ex);
+            }
         }
 
         public void SendUserMessage(JArray content) => Send(new JObject
@@ -131,42 +172,33 @@ namespace ClaudeVS.Chat
             ["response"] = new JObject { ["subtype"] = "success", ["request_id"] = requestId, ["response"] = response },
         });
 
+        /// <summary>Arrête le processus sans attendre : la fin (taskkill, libération) se fait en arrière-plan.</summary>
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
+            try { _queue.CompleteAdding(); } catch { }
             try { _stdin.Dispose(); } catch { }
-            try
+            var process = _process;
+            var job = _job;
+            Task.Run(() =>
             {
-                if (!_process.HasExited)
+                try
                 {
-                    // Tue aussi les sous-processus (bash, outils…) lancés par le CLI
-                    using (var kill = Process.Start(new ProcessStartInfo("taskkill", $"/T /F /PID {_process.Id}")
-                    { CreateNoWindow = true, UseShellExecute = false }))
-                        kill?.WaitForExit(3000);
+                    if (!process.HasExited)
+                    {
+                        // Tue aussi les sous-processus (bash, outils…) lancés par le CLI
+                        using (var kill = Process.Start(new ProcessStartInfo("taskkill", $"/T /F /PID {process.Id}")
+                        { CreateNoWindow = true, UseShellExecute = false }))
+                            kill?.WaitForExit(3000);
+                    }
                 }
-            }
-            catch { }
-            try { _process.Dispose(); } catch { }
-        }
-
-        /// <summary>Échappement des arguments selon les règles de CommandLineToArgvW.</summary>
-        private static IEnumerable<string> Quote(IEnumerable<string> args)
-        {
-            foreach (var a in args)
-            {
-                if (a.Length > 0 && a.IndexOfAny(new[] { ' ', '\t', '"' }) < 0) { yield return a; continue; }
-                var sb = new StringBuilder("\"");
-                var backslashes = 0;
-                foreach (var c in a)
-                {
-                    if (c == '\\') { backslashes++; continue; }
-                    if (c == '"') { sb.Append('\\', backslashes * 2 + 1); sb.Append('"'); }
-                    else { sb.Append('\\', backslashes); sb.Append(c); }
-                    backslashes = 0;
-                }
-                sb.Append('\\', backslashes * 2);
-                sb.Append('"');
-                yield return sb.ToString();
-            }
+                catch (Exception ex) { _log.Info("taskkill : " + ex.Message); }
+                try { job?.Dispose(); } catch { }  // fermeture du job = mort de ce qui resterait
+                try { process.WaitForExit(3000); } catch { }
+                try { process.Dispose(); } catch { }
+                try { _queue.Dispose(); } catch { }
+            });
         }
     }
 }
