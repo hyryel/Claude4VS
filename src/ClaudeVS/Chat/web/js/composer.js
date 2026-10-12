@@ -9,6 +9,7 @@ import {
 import { post } from './host.js';
 import { setChosenModel, setChosenEffort } from './toolbar.js';
 import { ToHost } from './protocol.js';
+import { icon, withIcon } from './icons.js';
 import { addOwnMessage, interrupt, clear } from './conversation.js';
 
 // ---------------------------------------------------------------- saisie
@@ -21,7 +22,7 @@ export function resizeInput() {
 export function send() {
   const text = inputEl.value.trim();
   if (!text && !state.images.length) return;
-  const ctx = !selectionEl.hidden && !selectionEl.classList.contains('off') ? selectionEl.textContent.replace(/^📎 /, '') : null;
+  const ctx = !selectionEl.hidden && !selectionEl.classList.contains('off') ? selectionEl.textContent : null;
   addOwnMessage(text, ctx, state.images);
   state.stick = true; scroll();
   post({ type: ToHost.send, text, images: state.images.map(i => ({ mediaType: i.mediaType, data: i.data })) });
@@ -43,7 +44,7 @@ export function onInsert(m) {
 
 export function onSelection(m) {
   selectionEl.hidden = !m.label;
-  selectionEl.textContent = '📎 ' + (m.label || '');
+  withIcon(selectionEl, 'clip', m.label || '');
 }
 
 export function onSettings(m) {
@@ -98,7 +99,8 @@ function renderAttachments() {
     const thumb = attachmentsEl.appendChild(el('div', 'thumb'));
     const im = thumb.appendChild(el('img'));
     im.src = img.url; im.alt = 'Image jointe ' + (i + 1);
-    const x = thumb.appendChild(el('button', 'remove', '✕'));
+    const x = thumb.appendChild(el('button', 'remove'));
+    x.appendChild(icon('close', 8));
     x.title = 'Retirer';
     x.setAttribute('aria-label', 'Retirer l\'image ' + (i + 1));
     x.onclick = () => { state.images.splice(i, 1); renderAttachments(); };

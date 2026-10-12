@@ -38,25 +38,25 @@
     </label>
     <span class="spacer"></span>
     <span class="actions">
-      <button id="history" class="icon" title="Conversations précédentes" aria-label="Conversations précédentes">🕘</button>
-      <button id="newChat" class="icon" title="Nouvelle conversation" aria-label="Nouvelle conversation"><svg class="glyph" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="5" y="1" width="2" height="10"/><rect x="1" y="5" width="10" height="2"/></svg></button>
+      <button id="history" class="icon" title="Conversations précédentes" aria-label="Conversations précédentes" data-icon="history"></button>
+      <button id="newChat" class="icon" title="Nouvelle conversation" aria-label="Nouvelle conversation" data-icon="plus"></button>
     </span>
   </header>
 
   <div id="banner" role="status" hidden>
     <span id="bannerText"></span>
-    <button id="closeBanner" class="icon" title="Fermer" aria-label="Fermer l'annonce"><svg class="glyph" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></button>
+    <button id="closeBanner" class="icon" title="Fermer" aria-label="Fermer l'annonce" data-icon="close"></button>
   </div>
 
   <div id="sessions" hidden>
-    <div class="sessions-head">Conversations récentes <button id="closeSessions" class="icon" aria-label="Fermer la liste des conversations">✕</button></div>
+    <div class="sessions-head">Conversations récentes <button id="closeSessions" class="icon" aria-label="Fermer la liste des conversations" data-icon="close"></button></div>
     <div id="sessionList"></div>
   </div>
 
   <main id="messages">
     <div id="welcome">
       <h2>Claude</h2>
-      <p>Posez une question ou demandez une modification. La sélection courante de l'éditeur est jointe automatiquement (puce 📎 ci-dessous).</p>
+      <p>Posez une question ou demandez une modification. La sélection courante de l'éditeur est jointe automatiquement (puce <span data-icon="clip"></span>ci-dessous).</p>
       <p class="hint">Entrée pour envoyer · Maj+Entrée pour un saut de ligne · <code>/</code> pour les commandes</p>
     </div>
   </main>
@@ -68,7 +68,7 @@
       <span id="context" hidden title="">
         <span class="bar"><span class="fill"></span></span>
         <span class="pct"></span>
-        <button id="compact" class="icon" title="Compacter le contexte (/compact)" aria-label="Compacter le contexte">⇲</button>
+        <button id="compact" class="icon" title="Compacter le contexte (/compact)" aria-label="Compacter le contexte" data-icon="compact"></button>
       </span>
     </div>
     <div id="slash" role="listbox" aria-label="Suggestions" hidden></div>
@@ -76,15 +76,15 @@
     <div class="input-row">
       <textarea id="input" rows="3" aria-label="Message à Claude" aria-autocomplete="list" aria-controls="slash" placeholder="Demander à Claude… (@ pour un fichier, / pour une commande, Ctrl+V pour une image)"></textarea>
       <div class="input-buttons">
-        <button id="send" title="Envoyer (Entrée)" aria-label="Envoyer">➤</button>
-        <button id="attach" class="icon" title="Joindre une image" aria-label="Joindre une image">🖼</button>
+        <button id="send" title="Envoyer (Entrée)" aria-label="Envoyer" data-icon="send"></button>
+        <button id="attach" class="icon" title="Joindre une image" aria-label="Joindre une image" data-icon="image"></button>
       </div>
       <input id="fileInput" type="file" accept="image/*" multiple hidden>
     </div>
     <div class="context-row">
       <button id="selection" class="chip" title="Joindre la sélection de l'éditeur" hidden></button>
-      <button id="autoFormat" class="chip off" title="Mettre en forme (Ctrl+K Ctrl+D) chaque fichier modifié par Claude">✨ Format auto</button>
-      <button id="autoAnalyze" class="chip" title="Quand le débogueur s'arrête sur une exception, demander l'analyse à Claude">⚡ Exceptions</button>
+      <button id="autoFormat" class="chip off" title="Mettre en forme (Ctrl+K Ctrl+D) chaque fichier modifié par Claude" data-icon="sparkle">Format auto</button>
+      <button id="autoAnalyze" class="chip" title="Quand le débogueur s'arrête sur une exception, demander l'analyse à Claude" data-icon="bolt">Exceptions</button>
       <span id="cwd"></span>
     </div>
   </footer>
