@@ -1,7 +1,7 @@
 // Messages assistant : conteneurs, blocs texte / réflexion, flux stream_event et activité des sous-agents.
 import { state, messages, streamed, tools, subTools } from './state.js';
 import { el, append, scroll } from './dom.js';
-import { renderMd, renderDiagrams } from './markdown.js';
+import { renderMd, renderDiagrams, addCopyButtons } from './markdown.js';
 import { toolElement, toolSummary, setOpen } from './tools.js';
 import { toolLabel } from './conversation.js';
 import { setActualModel } from './toolbar.js';
@@ -37,7 +37,8 @@ export function textBlock(container) {
     clearTimeout(block.timer); block.timer = 0;
     cancelAnimationFrame(block.raf); block.raf = 0;
     div.innerHTML = renderMd(block.text);
-    renderDiagrams(div);
+    renderDiagrams(div); // remplace les blocs mermaid avant son premier await
+    addCopyButtons(div);
   };
   return block;
 }

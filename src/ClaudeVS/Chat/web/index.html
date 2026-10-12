@@ -6,6 +6,7 @@
   <!-- img-src sans https: : une image distante dans une réponse serait chargée sans clic (canal d'exfiltration) ; les captures collées sont en data: -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; form-action 'none'">
   <title>Claude</title>
+  <link rel="icon" href="data:,"> <!-- évite la requête favicon.ico (erreur 404 en console) -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>

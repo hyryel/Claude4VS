@@ -26,6 +26,36 @@ export function renderMd(text) {
   catch (e) { console.error(e); return el('pre', 'block wrap', text || '').outerHTML; } // repli : texte brut échappé
 }
 
+// ---------------------------------------------------------------- bouton « copier » des blocs de code
+
+const COPY_ICON = '<svg class="glyph" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">'
+  + '<path d="M4.5 4.5h6v6h-6zM1.5 7.5v-6h6" stroke="currentColor" stroke-width="1" fill="none"/></svg>';
+
+// Ajouté hors de DOMPurify (qui interdit <button> dans le contenu rendu) une fois le texte complet, après
+// renderDiagrams : les blocs mermaid sont déjà remplacés. Le bouton est dans une enveloppe et non dans le <pre>,
+// sinon il défilerait avec un bloc plus large que le panneau.
+export function addCopyButtons(container) {
+  for (const code of container.querySelectorAll('pre > code')) {
+    const pre = code.parentElement;
+    const wrap = el('div', 'code-wrap');
+    pre.replaceWith(wrap);
+    wrap.appendChild(pre);
+    const btn = wrap.appendChild(el('button', 'icon copy'));
+    btn.title = 'Copier';
+    btn.setAttribute('aria-label', 'Copier le bloc de code');
+    btn.innerHTML = COPY_ICON;
+    let timer = 0;
+    btn.addEventListener('click', async () => {
+      let ok = true;
+      try { await navigator.clipboard.writeText(code.textContent); } catch (e) { console.error(e); ok = false; }
+      clearTimeout(timer);
+      btn.textContent = ok ? 'Copié' : 'Échec';
+      btn.classList.add('done');
+      timer = setTimeout(() => { btn.innerHTML = COPY_ICON; btn.classList.remove('done'); }, 1500);
+    });
+  }
+}
+
 // ---------------------------------------------------------------- diagrammes Mermaid
 
 export function initMermaid() {
