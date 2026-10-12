@@ -21,7 +21,7 @@
       <Button guid="guidClaudeVSCmdSet" id="cmdOpenChat" priority="0x0090" type="Button">
         <Parent guid="guidClaudeVSCmdSet" id="ToolsGroup" />
         <Strings>
-          <ButtonText>Claude</ButtonText>
+          <ButtonText>Ouvrir une fenêtre Claude</ButtonText>
           <CanonicalName>.Claude.OpenChat</CanonicalName>
           <LocalizedName>.Claude.OpenChat</LocalizedName>
         </Strings>

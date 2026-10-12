@@ -50,18 +50,24 @@ namespace ClaudeVS.Chat
         private readonly ThemeChangedEventHandler _onThemeChanged;
         private IWebView2 _web = CreateWebView();
 
+        private static bool _compositionFailed;   // contrôle composé en échec une fois : WebView2 classique jusqu'au redémarrage
+
         /// <summary>
-        /// WebView2CompositionControl (rendu composé par WPF) quand la DLL de VS l'expose (VS 2026) : un panneau de VS
-        /// posé par-dessus masque alors le chat et reçoit ses clics. Sinon (VS 2022, type encore interne) : WebView2,
-        /// fenêtre native toujours dessinée devant le contenu WPF.
+        /// WebView2CompositionControl (rendu composé par WPF) : un panneau de VS posé par-dessus masque le chat et reçoit
+        /// ses clics. Public dans la DLL de VS 2026, encore interne dans celle de VS 2022 (1.0.2903.40) mais présent :
+        /// créé par réflexion dans les deux cas. Repli sur WebView2, fenêtre native toujours dessinée devant le contenu WPF.
         /// </summary>
         private static IWebView2 CreateWebView()
         {
             var composition = typeof(WebView2).Assembly.GetType("Microsoft.Web.WebView2.Wpf.WebView2CompositionControl");
-            if (composition != null && composition.IsPublic && typeof(IWebView2).IsAssignableFrom(composition))
-                return (IWebView2)Activator.CreateInstance(composition);
+            if (!_compositionFailed && composition != null && typeof(IWebView2).IsAssignableFrom(composition))
+            {
+                try { return (IWebView2)Activator.CreateInstance(composition, nonPublic: true); }
+                catch (Exception) { _compositionFailed = true; }
+            }
             return new WebView2();
         }
+
         private readonly List<string> _queue = new List<string>();
         private bool _uiReady;
         private bool _initFailed;
@@ -153,6 +159,17 @@ namespace ClaudeVS.Chat
                 };
 
                 _web.Source = new Uri($"https://{Host}/index.html");
+            }
+            catch (Exception ex) when (!(_web is WebView2) && !_disposed)
+            {
+                // Contrôle composé inutilisable (DLL de VS trop ancienne ?) : nouvel essai avec WebView2 classique
+                _package.Log.Error("WebView2 (rendu composé), repli sur WebView2 classique : " + ex);
+                _compositionFailed = true;
+                try { _web.Dispose(); } catch { }
+                _web = CreateWebView();
+                Content = _web;
+                _initialized = false;
+                RunOnUi(InitAsync, "webview");
             }
             catch (Exception ex)
             {
