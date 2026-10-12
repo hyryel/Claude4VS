@@ -156,6 +156,9 @@ details.thinking .content { white-space: pre-wrap; padding: 4px 0 4px 12px; }
 .tool-head:hover::before { border-color: var(--fg); }
 .tool-head .summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-family: Consolas, monospace; }
 .tool-head .state { white-space: nowrap; }
+/* Décision de permission, résorbée dans l'en-tête de l'outil */
+.perm-tag { flex: none; font-size: 11px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--border); color: var(--muted); }
+.perm-tag.deny { color: var(--err); border-color: var(--err); }
 .tool.running .state::after { content: "…"; }
 .tool.ok .state { color: var(--ok); }
 .tool.error .state { color: var(--err); }

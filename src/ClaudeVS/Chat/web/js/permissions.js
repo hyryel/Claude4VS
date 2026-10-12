@@ -21,6 +21,9 @@ export function permissionCard(m) {
   const req = m.request, id = m.request_id, input = req.input || {};
   const card = el('div', 'perm');
   perms.set(id, card);
+  // Mémorisés pour résorber la carte dans celle de l'outil une fois la décision prise (onPermissionResolved)
+  card.dataset.toolUseId = req.tool_use_id || '';
+  card.dataset.kind = req.tool_name === 'AskUserQuestion' || req.tool_name === 'ExitPlanMode' ? 'dialog' : 'tool';
   const place = node => placeCard(node, req.tool_use_id);
   const respond = response => post({ type: ToHost.permission, requestId: id, response });
   // Refus avec consigne : on interrompt le tour puis la consigne part comme un vrai message utilisateur
@@ -138,6 +141,17 @@ export function questionCard(card, input, respond) {
 export function onPermissionResolved(id, behavior) {
   const card = perms.get(id);
   if (!card) return;
+  const label = behavior === 'allow' ? 'Autorisé' : behavior === 'cancelled' ? 'Expiré' : 'Refusé';
+  // Demande d'autorisation d'un outil : une fois décidée, elle n'apporte plus rien (les paramètres sont dans la carte
+  // de l'outil). On la retire et la décision reste tracée par une étiquette dans l'en-tête de l'outil.
+  // Les cartes de question et de plan, elles, portent les réponses de l'utilisateur : elles restent.
+  const tool = card.dataset.kind === 'tool' && tools.get(card.dataset.toolUseId);
+  if (tool) {
+    card.remove();
+    tool.querySelector('.tool-head .state').before(el('span', 'perm-tag ' + behavior, label));
+    perms.delete(id);
+    return;
+  }
   card.classList.add('resolved');
   card.querySelectorAll('button, input').forEach(x => { x.disabled = true; });
   card.appendChild(el('div', 'outcome', behavior === 'allow' ? '✓ Autorisé' : behavior === 'cancelled' ? 'Demande expirée' : '✗ Refusé'));
