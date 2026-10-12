@@ -207,7 +207,7 @@ namespace ClaudeVS.Chat
                     var mode = (string)msg["mode"] ?? "default";
                     if (!ClaudeSettings.IsValidMode(mode)) { RejectSetting("mode", mode); break; }
                     _permissionMode = mode;
-                    TrySend(() => _claude?.SendControlRequest(new JObject { ["subtype"] = "set_permission_mode", ["mode"] = _permissionMode }));
+                    ApplySetting("mode", new JObject { ["subtype"] = "set_permission_mode", ["mode"] = _permissionMode });
                     PostSettings();
                     break;
                 }
@@ -216,7 +216,7 @@ namespace ClaudeVS.Chat
                     var model = (string)msg["model"];
                     if (!string.IsNullOrEmpty(model) && !ClaudeSettings.IsValidModel(model)) { RejectSetting("modèle", model); break; }
                     _model = string.IsNullOrEmpty(model) ? null : model;
-                    TrySend(() => _claude?.SendControlRequest(new JObject { ["subtype"] = "set_model", ["model"] = _model }));
+                    ApplySetting("model", new JObject { ["subtype"] = "set_model", ["model"] = _model });
                     _controls.RequestApplied(); // le défaut d'effort dépend du modèle
                     PostSettings();
                     break;
@@ -228,14 +228,16 @@ namespace ClaudeVS.Chat
                     _effort = string.IsNullOrEmpty(effort) ? null : effort;
                     // À chaud : réglage de session (non persisté) ; au démarrage : --effort
                     if (_effort != null)
-                        TrySend(() => _claude?.SendControlRequest(new JObject
+                        ApplySetting("effort", new JObject
                         {
                             ["subtype"] = "apply_flag_settings",
                             ["settings"] = new JObject { ["effortLevel"] = _effort },
-                        }));
+                        });
                     else if (_claude?.IsRunning == true)
                         // Le CLI n'a pas de requête pour revenir à l'effort par défaut : il garde le réglage précédent
                         PostBanner("Effort par défaut : il s'appliquera à la prochaine conversation.\nLa conversation en cours garde l'effort actuel.");
+                    else
+                        PostSettingLater("effort");
                     PostSettings();
                     break;
                 }
@@ -321,6 +323,18 @@ namespace ClaudeVS.Chat
             string id = null;
             return TrySend(() => id = _claude.SendControlRequest(request)) ? id : null;
         }
+
+        /// <summary>Réglage de la barre d'outils : envoyé au CLI s'il tourne (sa réponse est confirmée à l'interface), sinon appliqué à son démarrage.</summary>
+        private void ApplySetting(string setting, JObject request)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (_claude?.IsRunning != true) PostSettingLater(setting);
+            else _controls.ApplySetting(setting, request); // échec d'envoi : déjà affiché par TrySend
+        }
+
+        /// <summary>CLI arrêté : le réglage passera par la ligne de commande au prochain démarrage.</summary>
+        private void PostSettingLater(string setting) =>
+            _post(new JObject { ["type"] = FromHost.SettingApplied, ["setting"] = setting, ["ok"] = true, ["later"] = true });
 
         private void HandleWriteFailure(ClaudeProcess source, Exception ex)
         {

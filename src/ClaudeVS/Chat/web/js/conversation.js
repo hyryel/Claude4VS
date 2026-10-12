@@ -189,7 +189,7 @@ const cliHandlers = {
   },
   control_response: m => {
     const r = m.response;
-    // Refus d'un set_model / set_permission_mode… : sans ce message, le sélecteur afficherait une valeur non appliquée
+    // Refus d'une requête sans gestionnaire côté C# (les réglages de la barre d'outils passent par settingApplied)
     if (r?.subtype === 'error') append(el('div', 'error', 'Commande refusée par le CLI : ' + (r.error || 'erreur inconnue')));
     if (r?.response?.commands) state.commands = r.response.commands;
     if (r?.response?.models) setModels(r.response.models);
