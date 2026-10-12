@@ -75,6 +75,9 @@ namespace ClaudeVS.Chat
         private bool _cliReady;                   // system/init reçu du processus courant
         private string _mcpConfigPath;            // fichier temporaire contenant le jeton du serveur MCP
         private int _restartSeq;                  // invalide un chargement d'historique dépassé par un autre Restart
+        private string _claudeCwd;                // dossier de travail du processus en cours (fixé au lancement)
+        private readonly EventHandler<Microsoft.VisualStudio.Shell.Events.OpenSolutionEventArgs> _onSolutionOpened;
+        private readonly EventHandler _onSolutionClosed;
 
         public ChatController(ClaudeVSPackage package, Action<JObject> post)
         {
@@ -82,6 +85,34 @@ namespace ClaudeVS.Chat
             _post = post;
             SelectionTracker.Changed += OnSelectionChanged;
             DebugMonitor.BreakOnException += OnExceptionBreak;
+            _onSolutionOpened = (s, e) => OnSolutionChanged();
+            _onSolutionClosed = (s, e) => OnSolutionChanged();
+            Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenSolution += _onSolutionOpened;
+            Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterCloseSolution += _onSolutionClosed;
+        }
+
+        /// <summary>
+        /// La solution a changé : le CLI, lui, garde le dossier de son lancement. L'interface continue d'afficher
+        /// et de résoudre les chemins par rapport à ce dossier (EffectiveCwd), et l'utilisateur est prévenu.
+        /// </summary>
+        private void OnSolutionChanged()
+        {
+            RunOnUi(() =>
+            {
+                PostSettings();
+                if (_claude?.IsRunning != true || _claudeCwd == null) return;
+                var current = WorkingDirectory();
+                if (string.Equals(current, _claudeCwd, StringComparison.OrdinalIgnoreCase)) return;
+                PostNotice($"La solution a changé, mais Claude travaille toujours dans {_claudeCwd}. "
+                         + $"Démarrez une nouvelle conversation pour passer dans {current}.");
+            }, "solution");
+        }
+
+        /// <summary>Dossier de référence des chemins : celui du CLI s'il tourne, sinon celui de la solution courante.</summary>
+        private string EffectiveCwd()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return _claude?.IsRunning == true && _claudeCwd != null ? _claudeCwd : WorkingDirectory();
         }
 
         // ---- Exécution protégée sur le thread UI --------------------------------------------
@@ -275,7 +306,7 @@ namespace ClaudeVS.Chat
         /// <summary>Autocomplétion des @-mentions ; seq permet à l'interface d'ignorer les réponses périmées.</summary>
         private void SearchFiles(string query, int seq)
         {
-            var root = WorkingDirectory();
+            var root = EffectiveCwd();
             RunOnUi(async () =>
             {
                 var files = await _files.SearchAsync(root, query);
@@ -286,7 +317,7 @@ namespace ClaudeVS.Chat
         /// <summary>Insère une @-mention dans la zone de saisie (commande « Envoyer la sélection à Claude »).</summary>
         public void InsertMention(string path, int? lineStart, int? lineEnd)
         {
-            var root = WorkingDirectory();
+            var root = EffectiveCwd();
             var rel = path.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase) ? path.Substring(root.Length + 1) : path;
             var mention = "@" + rel.Replace('\\', '/');
             if (lineStart.HasValue)
@@ -338,11 +369,13 @@ namespace ClaudeVS.Chat
                 // Sauvegarde des fichiers avant chaque modification, pour le retour arrière
                 var env = new Dictionary<string, string> { ["CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"] = "true" };
                 _package.Log.Info("CLI : " + cmd);
-                claude = new ClaudeProcess(cmd.FileName, WorkingDirectory(), args, env, _package.Log);
+                var cwd = WorkingDirectory();
+                claude = new ClaudeProcess(cmd.FileName, cwd, args, env, _package.Log);
                 claude.MessageReceived += m => OnCliMessage(claude, m);
                 claude.Exited += (code, stderr) => OnCliExited(claude, code, stderr);
                 claude.WriteFailed += ex => RunOnUi(() => HandleWriteFailure(claude, ex), "write");
                 _claude = claude;
+                _claudeCwd = cwd;
                 _cliReady = false;
                 claude.SendControlRequest(new JObject { ["subtype"] = "initialize" });
                 PostStatus("starting");
@@ -418,6 +451,7 @@ namespace ClaudeVS.Chat
             ThreadHelper.ThrowIfNotOnUIThread();
             var old = _claude;
             _claude = null;
+            _claudeCwd = null;
             _busy = false;
             _cliReady = false;
             ClearPendingPermissions();
@@ -860,7 +894,7 @@ namespace ClaudeVS.Chat
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (string.IsNullOrEmpty(path)) return;
-            if (!Path.IsPathRooted(path)) path = Path.Combine(WorkingDirectory(), path);
+            if (!Path.IsPathRooted(path)) path = Path.Combine(EffectiveCwd(), path);
             if (!File.Exists(path)) return;
             VsShellUtilities.OpenDocument(_package, path, Guid.Empty, out _, out _, out var frame, out var view);
             frame?.Show();
@@ -882,13 +916,15 @@ namespace ClaudeVS.Chat
             ["attachSelection"] = _attachSelection,
             ["autoFormat"] = _autoFormat,
             ["autoAnalyze"] = _autoAnalyzeExceptions,
-            ["cwd"] = WorkingDirectory(),
+            ["cwd"] = EffectiveCwd(),
         });
 
         public void Dispose()
         {
             SelectionTracker.Changed -= OnSelectionChanged;
             DebugMonitor.BreakOnException -= OnExceptionBreak;
+            Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenSolution -= _onSolutionOpened;
+            Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterCloseSolution -= _onSolutionClosed;
             StopProcess();
         }
     }
