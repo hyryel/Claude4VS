@@ -42,6 +42,7 @@ export const FromHost = Object.freeze({
   rewindDone: 'rewindDone',
   settings: 'settings',
   applied: 'applied', // modèle et effort réellement appliqués par le CLI
+  settingApplied: 'settingApplied', // réponse du CLI à un réglage de la barre d'outils (later : appliqué au démarrage)
   sessions: 'sessions',
   files: 'files',
   theme: 'theme',

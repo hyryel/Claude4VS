@@ -101,6 +101,22 @@ namespace ClaudeVS.Chat
             });
         }
 
+        /// <summary>
+        /// Réglage de la barre d'outils (set_model, set_permission_mode, apply_flag_settings) : la réponse du CLI est
+        /// rapportée à l'interface, qui confirme le changement ou affiche le refus. Faux si le CLI ne tourne pas.
+        /// </summary>
+        public bool ApplySetting(string setting, JObject request)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return Send(request, r => _post(new JObject
+            {
+                ["type"] = FromHost.SettingApplied,
+                ["setting"] = setting,
+                ["ok"] = (string?)r["subtype"] == "success",
+                ["error"] = r["error"],
+            }));
+        }
+
         /// <summary>Retour arrière des fichiers à l'état précédant un message utilisateur (dry run = aperçu).</summary>
         public void Rewind(string uuid, bool dryRun)
         {

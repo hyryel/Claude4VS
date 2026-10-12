@@ -1,5 +1,19 @@
 // Barre d'outils : liste des modèles fournie par le CLI, modèle réellement utilisé, niveaux d'effort acceptés.
-import { modelEl, effortEl } from './dom.js';
+import { el, append, modeEl, modelEl, effortEl } from './dom.js';
+
+const SETTING_LABELS = { model: 'Modèle', effort: 'Effort', mode: 'Permissions' };
+const APPLIED = { model: 'appliqué', effort: 'appliqué', mode: 'appliquées' }; // accord avec le libellé
+
+/** Réponse du CLI à un changement de réglage : confirmation dans le fil (libellé de l'entrée choisie) ou refus. */
+export function onSettingApplied(m) {
+  const label = SETTING_LABELS[m.setting] || m.setting;
+  const applied = APPLIED[m.setting] || 'appliqué';
+  if (!m.ok) return append(el('div', 'error', `${label} : changement refusé par le CLI (${m.error || 'erreur inconnue'}).`));
+  const select = { model: modelEl, effort: effortEl, mode: modeEl }[m.setting];
+  // « Par défaut » sans la parenthèse : le modèle ou l'effort qu'elle annonce n'est pas encore rafraîchi (get_settings)
+  const value = select?.value ? select.selectedOptions[0].textContent : 'par défaut';
+  append(el('div', 'notice', m.later ? `${label} : ${value}, ${applied} au démarrage de Claude.` : `${label} ${applied} : ${value}.`));
+}
 
 // Repli tant que le CLI n'a pas répondu à initialize (ou s'il ne fournit pas de liste)
 const FALLBACK_MODELS = [
