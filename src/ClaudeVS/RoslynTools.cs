@@ -23,20 +23,20 @@ namespace ClaudeVS
     /// diagnostics et renommage de toute la solution. Le but est d'épargner au modèle la lecture des
     /// fichiers pour retrouver des symboles ou des références.
     /// </summary>
-    internal sealed class RoslynTools
+    internal sealed class RoslynTools : ToolGroup
     {
-        public static readonly HashSet<string> Names = new HashSet<string>
-        {
-            "findSymbol", "symbolInfo", "findReferences", "documentSymbols", "semanticDiagnostics", "renameSymbol",
-        };
-
         private const int MaxResults = 300;
         private static readonly TimeSpan MaxDuration = TimeSpan.FromSeconds(120); // borne des opérations Roslyn (solution énorme ou en cours de chargement)
         private static readonly TimeSpan LongDuration = TimeSpan.FromMinutes(10); // renommage et diagnostics de toute la solution : compilation complète
         private const int ConflictCheckMaxDocuments = 25; // au-delà, la vérification des conflits de renommage coûterait des minutes
         private readonly AsyncPackage _package;
+        private readonly Log _log;
 
-        public RoslynTools(AsyncPackage package) => _package = package;
+        public RoslynTools(AsyncPackage package, Log log)
+        {
+            _package = package;
+            _log = log;
+        }
 
         private static JObject SymbolArgs() => new JObject
         {
@@ -46,7 +46,7 @@ namespace ClaudeVS
             ["name"] = IdeTools.Str("Symbol name, used alone (solution-wide lookup, must be unique) or to locate it in the line. May be qualified, e.g. 'Invoice.Total'."),
         };
 
-        public static JArray Definitions() => new JArray
+        public override JArray Definitions() => new JArray
         {
             IdeTools.Tool("findSymbol", "Find types and members by name across the whole solution (Roslyn, C#/VB), without reading files. Returns kind, full name and definition location.", new JObject
             {
@@ -88,7 +88,7 @@ namespace ClaudeVS
         }
 
         /// <param name="outer">Annulé si le client se déconnecte ; un délai maximal s'y ajoute.</param>
-        public async Task<JObject> CallAsync(string name, JObject args, CancellationToken outer)
+        public override async Task<JObject> CallAsync(string name, JObject args, CancellationToken outer)
         {
             var ws = await GetWorkspaceAsync();
             var solution = ws.CurrentSolution;
@@ -420,7 +420,7 @@ namespace ClaudeVS
                 // TryApplyChanges refuse si la solution a changé entre-temps : on le signale au modèle
                 applied = ws.TryApplyChanges(newSolution);
                 if (!applied) throw new InvalidOperationException("Visual Studio refused to apply the rename (solution changed meanwhile, or document locked). Call renameSymbol again.");
-                ClaudeVSPackage.Instance?.Log.Info($"Renommage : {symbol.ToDisplayString()} → {newName} ({files.Count} fichier(s))");
+                _log?.Info($"Renommage : {symbol.ToDisplayString()} → {newName} ({files.Count} fichier(s))");
             }
             return IdeTools.Json(new JObject
             {

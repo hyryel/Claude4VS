@@ -23,8 +23,6 @@ namespace ClaudeVS
         public const int CmdMention = 0x0101;
         public const int CmdOpenChat = 0x0102;
 
-        public static ClaudeVSPackage Instance { get; private set; }
-
         internal IdeServer Server { get; private set; }
         internal IdeTools Tools { get; private set; }
         internal Log Log { get; private set; }
@@ -32,14 +30,14 @@ namespace ClaudeVS
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
-            Instance = this;
             Log = new Log(this);
 
-            var tools = new IdeTools(this);
+            var tools = new IdeTools(this, Log);
             Tools = tools;
             Server = new IdeServer(tools, Log);
             Server.Start(await tools.GetWorkspaceFoldersAsync());
-            DebugMonitor.Start(tools.Debug);
+            DebugMonitor.Start(tools.Debug, Log, EnsureChatVisible);
+            SelectionTracker.Start(Log);
 
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenSolution += (s, e) => RefreshWorkspace();
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterCloseSolution += (s, e) => RefreshWorkspace();

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
+#nullable enable
 
 namespace ClaudeVS.Chat
 {
@@ -17,9 +18,9 @@ namespace ClaudeVS.Chat
         private JobObject(SafeFileHandle handle) => _handle = handle;
 
         /// <summary>Crée le job et y affecte le processus. Retourne null (sans lever) si l'OS refuse.</summary>
-        public static JobObject TryCreateFor(Process process, Log log)
+        public static JobObject? TryCreateFor(Process process, Log? log)
         {
-            SafeFileHandle handle = null;
+            SafeFileHandle? handle = null;
             try
             {
                 handle = CreateJobObject(IntPtr.Zero, null);
@@ -95,7 +96,7 @@ namespace ClaudeVS.Chat
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern SafeFileHandle CreateJobObject(IntPtr lpJobAttributes, string lpName);
+        private static extern SafeFileHandle CreateJobObject(IntPtr lpJobAttributes, string? lpName);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool SetInformationJobObject(SafeFileHandle hJob, int infoClass, IntPtr lpInfo, uint cbInfoLength);

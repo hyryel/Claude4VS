@@ -8,7 +8,8 @@
   --input-bg: #2b2b2b;
   --input-fg: #e6e6e6;
   --input-border: #444;
-  --muted: color-mix(in srgb, var(--fg) 55%, transparent);
+  /* 70 % : contraste ≥ 5,6 sur tous les fonds, thèmes clair et sombre de VS (55 % donnait 3,55 en clair) */
+  --muted: color-mix(in srgb, var(--fg) 70%, transparent);
   --subtle-bg: color-mix(in srgb, var(--fg) 6%, var(--bg));
   --user-bg: color-mix(in srgb, var(--accent) 16%, var(--bg));
   --ok: #3fb950;
@@ -50,6 +51,30 @@ button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.icon { padding: 2px 7px; background: transparent; border-color: transparent; }
 button.icon:hover { border-color: var(--input-border); }
+/* Icônes dessinées en SVG : traits calés sur les pixels, indépendants des polices (le « ＋ » pleine chasse était déformé) */
+svg.glyph { display: block; fill: currentColor; shape-rendering: crispEdges; }
+/* Même hauteur pour les boutons de la barre, qu'ils contiennent un emoji ou une icône SVG */
+#toolbar button.icon { display: inline-flex; align-items: center; justify-content: center; height: 26px; }
+
+/* Bandeau d'annonce (changement de solution…) : orange, sous la barre d'outils, hors du fil */
+#banner {
+  position: relative; /* ancre de la barre de décompte */
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 8px 6px 10px; border-bottom: 1px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, var(--bg));
+  border-left: 3px solid var(--warn);
+}
+#banner[hidden] { display: none; }
+#bannerText { flex: 1; font-size: 12px; color: var(--fg); white-space: pre-line; } /* \n du C# = une phrase par ligne */
+#banner button.icon { padding: 3px 5px; }
+/* Fermeture automatique : barre qui décroît de toute la largeur à zéro en 5 s ; sa fin ferme le bandeau (host.js) */
+#banner.auto::after {
+  content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+  background: var(--warn); transform-origin: left;
+  animation: banner-countdown 5s linear forwards;
+}
+#banner.auto:hover::after { animation-play-state: paused; } /* le temps de lire */
+@keyframes banner-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 select {
   background: var(--input-bg);
   border: 1px solid var(--input-border);
@@ -121,12 +146,25 @@ details.thinking .content { white-space: pre-wrap; padding: 4px 0 4px 12px; }
 .tool-head { display: flex; gap: 6px; align-items: baseline; padding: 4px 8px; cursor: pointer; }
 .tool-head:focus-visible, .session:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .tool-head .name { font-weight: 600; white-space: nowrap; }
+/* Chevron dessiné en CSS (pas de glyphe) : → replié, ↓ déplié ; signale que la carte se déplie */
+.tool-head::before {
+  content: ""; flex: none; align-self: center; width: 5px; height: 5px; margin: 0 2px 0 0;
+  border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg); transition: transform .12s;
+}
+.tool.open > .tool-head::before { transform: rotate(45deg); }
+.tool-head:hover::before { border-color: var(--fg); }
 .tool-head .summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-family: Consolas, monospace; }
 .tool-head .state { white-space: nowrap; }
+/* Décision de permission, résorbée dans l'en-tête de l'outil */
+.perm-tag { flex: none; font-size: 11px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--border); color: var(--muted); }
+.perm-tag.deny { color: var(--err); border-color: var(--err); }
 .tool.running .state::after { content: "…"; }
 .tool.ok .state { color: var(--ok); }
 .tool.error .state { color: var(--err); }
 .tool-body { display: none; padding: 0 8px 8px; }
+/* Erreur d'outil : résumé d'une ligne toujours visible, détail dans le corps repliable */
+.tool-error-summary { padding: 0 8px 5px; color: var(--err); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool.open .tool-body { display: block; }
 .tool-body pre { margin: 6px 0 0; max-height: 300px; overflow: auto; }
 pre.block.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -210,6 +248,12 @@ a.file:hover { text-decoration: underline; }
 }
 .msg.user:hover .rewind { opacity: .8; }
 .rewind-card { margin: 6px 0 10px; }
+/* Confirmation de retour arrière, en fin de conversation */
+.rewind-done { margin: 8px 0 12px; padding: 8px 10px; border: 1px solid var(--ok); border-radius: 4px; background: color-mix(in srgb, var(--ok) 12%, transparent); }
+/* Vert mélangé à la couleur du texte : contraste ≥ 4,5 en thème clair comme en sombre (vert pur : 3,96 en clair) */
+.rewind-done .title { font-weight: 600; color: color-mix(in srgb, var(--ok) 70%, var(--fg)); }
+.rewind-done ul { margin: 4px 0; padding-left: 18px; font-family: Consolas, monospace; font-size: 12px; }
+.rewind-done .outcome { color: color-mix(in srgb, var(--fg) 80%, transparent); font-size: 12px; }
 .rewind-card ul { margin: 4px 0; padding-left: 18px; font-family: Consolas, monospace; font-size: 12px; }
 .input-row { display: flex; gap: 6px; align-items: flex-end; }
 #input {

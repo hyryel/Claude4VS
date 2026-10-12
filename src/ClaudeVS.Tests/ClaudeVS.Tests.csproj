@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Les assemblies de Visual Studio ne se chargent pas hors de l'IDE : on ne référence pas ClaudeVS.csproj,
+       on compile directement les classes pures, en lien. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>ClaudeVS.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\ClaudeVS\CommandLine.cs" Link="Linked\CommandLine.cs" />
+    <Compile Include="..\ClaudeVS\TrxReport.cs" Link="Linked\TrxReport.cs" />
+    <Compile Include="..\ClaudeVS\Chat\EditPreview.cs" Link="Linked\EditPreview.cs" />
+    <Compile Include="..\ClaudeVS\Chat\ClaudeArguments.cs" Link="Linked\ClaudeArguments.cs" />
+    <Compile Include="..\ClaudeVS\Chat\IdePrompts.cs" Link="Linked\IdePrompts.cs" />
+    <Compile Include="..\ClaudeVS\Chat\SessionStore.cs" Link="Linked\SessionStore.cs" />
+  </ItemGroup>
+
+</Project>

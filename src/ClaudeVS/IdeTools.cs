@@ -25,16 +25,26 @@ namespace ClaudeVS
         private readonly DiffManager _diffs;
         private readonly DebugTools _debug;
         private readonly EditorTools _editor;
-        private readonly RoslynTools _roslyn;
 
-        public IdeTools(AsyncPackage package)
+        public IdeTools(AsyncPackage package, Log log)
         {
             _package = package;
-            _diffs = DiffManager.GetInstance(package);
-            _debug = new DebugTools(package);
+            _diffs = DiffManager.GetInstance(package, log);
+            _debug = new DebugTools(package, log);
             _editor = new EditorTools(package);
-            _roslyn = new RoslynTools(package);
+            // Ordre = ordre de tools/list
+            Groups = new IToolGroup[]
+            {
+                new CoreToolGroup(this),
+                _debug,
+                new TestToolGroup(package, log),
+                _editor,
+                new RoslynTools(package, log),
+            };
         }
+
+        /// <summary>Groupes d'outils, dans l'ordre de présentation.</summary>
+        public IReadOnlyList<IToolGroup> Groups { get; }
 
         internal EditorTools Editor => _editor;
         internal DebugTools Debug => _debug;
@@ -64,7 +74,37 @@ namespace ClaudeVS
             },
         };
 
-        public static JArray ToolDefinitions()
+        /// <param name="modelOnly">Uniquement les outils exposés au CLI du panneau.</param>
+        public JArray ToolDefinitions(bool modelOnly = false)
+        {
+            var tools = new JArray();
+            foreach (var g in Groups)
+                foreach (var t in g.Definitions())
+                    if (!modelOnly || g.ModelVisible((string)t["name"])) tools.Add(t.DeepClone());
+            return tools;
+        }
+
+        public bool IsModelVisible(string name) => Groups.Any(g => g.Handles(name) && g.ModelVisible(name));
+
+        /// <summary>Outils de base : diff, éditeurs, sélection, diagnostics, dossiers de travail.</summary>
+        private sealed class CoreToolGroup : ToolGroup
+        {
+            // Liste blanche : un nouvel outil de base n'est exposé au modèle que s'il est ajouté ici explicitement
+            // (pas de diff, de gestion d'onglets ni de « dernière sélection » pour le modèle)
+            private static readonly HashSet<string> Visible = new HashSet<string>
+            {
+                "getDiagnostics", "getOpenEditors", "getWorkspaceFolders", "getCurrentSelection", "openFile", "checkDocumentDirty", "saveDocument",
+            };
+
+            private readonly IdeTools _o;
+            public CoreToolGroup(IdeTools owner) => _o = owner;
+
+            public override JArray Definitions() => CoreDefinitions();
+            public override bool ModelVisible(string name) => Visible.Contains(name);
+            public override Task<JObject> CallAsync(string name, JObject args, CancellationToken ct) => _o.CallCoreAsync(name, args);
+        }
+
+        private static JArray CoreDefinitions()
         {
             var tools = new JArray
             {
@@ -103,9 +143,6 @@ namespace ClaudeVS
                 }, "filePath"),
                 Tool("getLatestSelection", "Get the most recent text selection (even if not in the active editor)"),
             };
-            foreach (var t in DebugTools.Definitions()) tools.Add(t);
-            foreach (var t in EditorTools.Definitions()) tools.Add(t);
-            foreach (var t in RoslynTools.Definitions()) tools.Add(t);
             return tools;
         }
 
@@ -115,6 +152,13 @@ namespace ClaudeVS
         public async Task<JObject> CallAsync(string name, JObject args, CancellationToken ct = default)
         {
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+            var group = Groups.FirstOrDefault(g => g.Handles(name));
+            if (group == null) throw new InvalidOperationException("Unknown tool: " + name);
+            return await group.CallAsync(name, args, ct);
+        }
+
+        private async Task<JObject> CallCoreAsync(string name, JObject args)
+        {
             switch (name)
             {
                 case "openDiff":
@@ -135,9 +179,6 @@ namespace ClaudeVS
                 case "checkDocumentDirty": return CheckDirty((string)args["filePath"]);
                 case "saveDocument": return Save((string)args["filePath"]);
                 default:
-                    if (DebugTools.Names.Contains(name)) return await _debug.CallAsync(name, args);
-                    if (EditorTools.Names.Contains(name)) return await _editor.CallAsync(name, args);
-                    if (RoslynTools.Names.Contains(name)) return await _roslyn.CallAsync(name, args, ct);
                     throw new InvalidOperationException("Unknown tool: " + name);
             }
         }
@@ -230,9 +271,26 @@ namespace ClaudeVS
             IVsTextView vsView;
             // Onglet provisoire (aperçu) si demandé, comme un simple clic dans l'Explorateur de solutions
             using (preview ? new NewDocumentStateScope(__VSNEWDOCUMENTSTATE.NDS_Provisional, VSConstants.NewDocumentStateReason.Navigation) : null)
-                VsShellUtilities.OpenDocument(_package, path, Guid.Empty, out _, out _, out frame, out vsView);
-            // makeFrontmost = false : l'onglet est ouvert sans voler le focus à l'éditeur courant
-            if (makeFrontmost) frame?.Show(); else frame?.ShowNoActivate();
+            {
+                if (makeFrontmost)
+                {
+                    VsShellUtilities.OpenDocument(_package, path, Guid.Empty, out _, out _, out frame, out vsView);
+                    frame?.Show(); // déjà ouvert : le ramène au premier plan
+                }
+                else
+                {
+                    // VsShellUtilities.OpenDocument active l'onglet lui-même : ShowNoActivate venait trop tard. L'API de bas
+                    // niveau crée la fenêtre sans l'afficher ; on l'affiche ensuite sans lui donner le focus.
+                    frame = null;
+                    if (Package.GetGlobalService(typeof(SVsUIShellOpenDocument)) is IVsUIShellOpenDocument opener)
+                    {
+                        var logicalView = VSConstants.LOGVIEWID_Primary;
+                        ErrorHandler.ThrowOnFailure(opener.OpenDocumentViaProject(path, ref logicalView, out _, out _, out _, out frame));
+                    }
+                    frame?.ShowNoActivate();
+                    vsView = frame != null ? VsShellUtilities.GetTextView(frame) : null;
+                }
+            }
             if (string.IsNullOrEmpty(startText) || vsView == null)
                 return Result("Opened file: " + path);
 

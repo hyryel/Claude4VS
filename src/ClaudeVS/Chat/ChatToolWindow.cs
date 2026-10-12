@@ -113,7 +113,7 @@ namespace ClaudeVS.Chat
                     JObject msg;
                     try { msg = JObject.Parse(e.WebMessageAsJson); }
                     catch (Exception ex) { _package.Log.Error("Message de l'interface illisible : " + ex.Message); return; }
-                    if ((string)msg["type"] == "ready")
+                    if ((string)msg["type"] == ToHost.Ready)
                     {
                         _uiReady = true;
                         _package.Log.Info("Interface du panneau prête.");
@@ -164,7 +164,13 @@ namespace ClaudeVS.Chat
             ThreadHelper.ThrowIfNotOnUIThread();
             _package.Log.Error($"WebView2 : échec du processus {e.ProcessFailedKind} ({e.Reason}) {e.ProcessDescription}");
             if (_disposed) return;
-            const string notice = "Le panneau a été rechargé après un plantage de WebView2 ; l'historique de la conversation est disponible via Reprendre.";
+            // Bandeau orange (comme le changement de solution), livré après le prochain « ready » de la page rechargée
+            var banner = new JObject
+            {
+                ["type"] = FromHost.Banner,
+                ["text"] = "Le panneau a été rechargé après un plantage de WebView2.\n"
+                         + "La conversation se poursuit ; son affichage est disponible via le bouton Conversations précédentes (🕘).",
+            };
             try
             {
                 switch (e.ProcessFailedKind)
@@ -175,12 +181,12 @@ namespace ClaudeVS.Chat
                         _web = new WebView2();
                         Content = _web;
                         _initialized = false;
-                        Post(new JObject { ["type"] = "notice", ["text"] = notice }); // livré après le prochain « ready »
+                        Post(banner);
                         RunOnUi(InitAsync, "webview");
                         break;
                     case CoreWebView2ProcessFailedKind.RenderProcessExited:
                         _uiReady = false;
-                        Post(new JObject { ["type"] = "notice", ["text"] = notice });
+                        Post(banner);
                         _web.CoreWebView2?.Reload();
                         break;
                     case CoreWebView2ProcessFailedKind.RenderProcessUnresponsive:
@@ -225,7 +231,7 @@ namespace ClaudeVS.Chat
             ThreadHelper.ThrowIfNotOnUIThread();
             if (_disposed) return;
             _web.Focus();
-            Post(new JObject { ["type"] = "focus" });
+            Post(new JObject { ["type"] = FromHost.Focus });
         }
 
         /// <summary>Envoie un message à l'interface (thread quelconque). Sans effet après Dispose ou si WebView2 n'a pas pu démarrer.</summary>
@@ -259,7 +265,7 @@ namespace ClaudeVS.Chat
             var bg = VSColorTheme.GetThemedColor(EnvironmentColors.ToolWindowBackgroundColorKey);
             Post(new JObject
             {
-                ["type"] = "theme",
+                ["type"] = FromHost.Theme,
                 ["dark"] = (bg.R * 299 + bg.G * 587 + bg.B * 114) / 1000 < 128,
                 ["vars"] = new JObject
                 {
