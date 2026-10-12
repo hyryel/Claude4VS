@@ -1,3 +1,5 @@
+/* Les couleurs dérivées (--muted, --subtle-bg, --user-bg, --add-bg, --del-bg, fonds des cartes) reposent sur color-mix()
+   (Chromium ≥ 111) : acquis avec WebView2 Evergreen, mais à garder en tête si un jour le moteur est figé. */
 :root {
   --bg: #1f1f1f;
   --fg: #e6e6e6;
@@ -15,6 +17,13 @@
   --add-bg: color-mix(in srgb, #3fb950 18%, transparent);
   --del-bg: color-mix(in srgb, #f85149 18%, transparent);
   --claude: #d97757;
+}
+/* Thème clair (classe posée par le gestionnaire « theme ») : couleurs sémantiques plus sombres, lisibles sur fond blanc */
+html.light {
+  --ok: #1a7f37;
+  --err: #cf222e;
+  --warn: #9a6700;
+  --claude: #c2410c;
 }
 
 * { box-sizing: border-box; }
@@ -75,6 +84,7 @@ select {
 
 .msg { margin: 10px 0; }
 .msg.user {
+  position: relative; /* ancre du bouton ↶ */
   background: var(--user-bg);
   border-radius: 8px;
   padding: 6px 10px;
@@ -109,6 +119,7 @@ details.thinking .content { white-space: pre-wrap; padding: 4px 0 4px 12px; }
 /* ---- Outils ---- */
 .tool { margin: 6px 0; border: 1px solid var(--border); border-radius: 5px; font-size: 12px; }
 .tool-head { display: flex; gap: 6px; align-items: baseline; padding: 4px 8px; cursor: pointer; }
+.tool-head:focus-visible, .session:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .tool-head .name { font-weight: 600; white-space: nowrap; }
 .tool-head .summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-family: Consolas, monospace; }
 .tool-head .state { white-space: nowrap; }
@@ -168,14 +179,14 @@ a.file:hover { text-decoration: underline; }
   content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--claude); margin-right: 6px; animation: pulse 1s infinite ease-in-out;
 }
-/* Pastille « Claude travaille… | ■ Arrêter » : un seul bloc cliquable quand le bouton est visible */
+/* Pastille « Claude travaille… | ■ Arrêter » : un seul bloc cliquable quand Claude travaille (classe busy posée par setStatus) */
 #activity { display: inline-flex; align-items: center; border: 1px solid transparent; border-radius: 4px; }
-#activity:has(#stop:not([hidden])) {
+#activity.busy {
   background: var(--input-bg); border-color: var(--input-border); cursor: pointer; color: var(--input-fg);
 }
-#activity:has(#stop:not([hidden])) #status { padding: 0 8px; }
-#activity:has(#stop:not([hidden])):hover { border-color: var(--err); }
-#activity:has(#stop:not([hidden])):hover #stop { background: color-mix(in srgb, var(--err) 18%, transparent); }
+#activity.busy #status { padding: 0 8px; }
+#activity.busy:hover { border-color: var(--err); }
+#activity.busy:hover #stop { background: color-mix(in srgb, var(--err) 18%, transparent); }
 #stop {
   display: inline-flex; align-items: center; gap: 6px;
   background: transparent; border: none; border-left: 1px solid var(--input-border); border-radius: 0 3px 3px 0;
@@ -194,7 +205,6 @@ a.file:hover { text-decoration: underline; }
 #context #compact { padding: 0 5px; }
 
 /* ---- Retour arrière ---- */
-.msg.user { position: relative; }
 .msg.user .rewind {
   position: absolute; top: 4px; right: 4px; padding: 0 6px; font-size: 12px; opacity: 0;
 }
@@ -228,10 +238,9 @@ a.file:hover { text-decoration: underline; }
 .sub-line.running::after { content: " …"; }
 .sub-line.ok::after { content: " ✓"; color: var(--ok); }
 .sub-line.error::after { content: " ✗"; color: var(--err); }
-.context-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.context-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; font-size: 11px; color: var(--muted); }
 #cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip { font-size: 11px; padding: 0 8px; border-radius: 10px; white-space: nowrap; }
-.context-row { flex-wrap: wrap; }
 .chip.off { opacity: .45; text-decoration: line-through; }
 
 #slash {

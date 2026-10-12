@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'">
+  <!-- img-src sans https: : une image distante dans une réponse serait chargée sans clic (canal d'exfiltration) ; les captures collées sont en data: -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; form-action 'none'">
   <title>Claude</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -29,12 +30,12 @@
       <option value="bypassPermissions">Tout autoriser</option>
     </select>
     <span class="spacer"></span>
-    <button id="history" class="icon" title="Conversations précédentes">🕘</button>
-    <button id="newChat" class="icon" title="Nouvelle conversation">＋</button>
+    <button id="history" class="icon" title="Conversations précédentes" aria-label="Conversations précédentes">🕘</button>
+    <button id="newChat" class="icon" title="Nouvelle conversation" aria-label="Nouvelle conversation">＋</button>
   </header>
 
   <div id="sessions" hidden>
-    <div class="sessions-head">Conversations récentes <button id="closeSessions" class="icon">✕</button></div>
+    <div class="sessions-head">Conversations récentes <button id="closeSessions" class="icon" aria-label="Fermer la liste des conversations">✕</button></div>
     <div id="sessionList"></div>
   </div>
 
@@ -53,16 +54,16 @@
       <span id="context" hidden title="">
         <span class="bar"><span class="fill"></span></span>
         <span class="pct"></span>
-        <button id="compact" class="icon" title="Compacter le contexte (/compact)">⇲</button>
+        <button id="compact" class="icon" title="Compacter le contexte (/compact)" aria-label="Compacter le contexte">⇲</button>
       </span>
     </div>
-    <div id="slash" hidden></div>
+    <div id="slash" role="listbox" aria-label="Suggestions" hidden></div>
     <div id="attachments" hidden></div>
     <div class="input-row">
-      <textarea id="input" rows="3" placeholder="Demander à Claude… (@ pour un fichier, / pour une commande, Ctrl+V pour une image)"></textarea>
+      <textarea id="input" rows="3" aria-label="Message à Claude" aria-autocomplete="list" aria-controls="slash" placeholder="Demander à Claude… (@ pour un fichier, / pour une commande, Ctrl+V pour une image)"></textarea>
       <div class="input-buttons">
-        <button id="send" title="Envoyer (Entrée)">➤</button>
-        <button id="attach" class="icon" title="Joindre une image">🖼</button>
+        <button id="send" title="Envoyer (Entrée)" aria-label="Envoyer">➤</button>
+        <button id="attach" class="icon" title="Joindre une image" aria-label="Joindre une image">🖼</button>
       </div>
       <input id="fileInput" type="file" accept="image/*" multiple hidden>
     </div>

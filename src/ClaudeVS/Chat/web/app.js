@@ -2,21 +2,54 @@
 (() => {
   'use strict';
 
+  // Références DOM résolues une seule fois au démarrage : un élément injecté dans le fil (id en double dans du HTML
+  // rendu) ne peut pas se substituer à un élément de l'application, et $() n'est plus appelé après l'initialisation.
   const $ = id => document.getElementById(id);
-  const messagesEl = $('messages'), inputEl = $('input'), statusEl = $('status');
+  const messagesEl = $('messages'), inputEl = $('input'), statusEl = $('status'), activityEl = $('activity'), stopEl = $('stop');
+  const welcomeEl = $('welcome'), selectionEl = $('selection'), contextEl = $('context'), slashEl = $('slash');
+  const sessionsEl = $('sessions'), sessionListEl = $('sessionList'), attachmentsEl = $('attachments'), fileInputEl = $('fileInput');
+  const modeEl = $('mode'), modelEl = $('model'), effortEl = $('effort'), cwdEl = $('cwd');
+  const autoFormatEl = $('autoFormat'), autoAnalyzeEl = $('autoAnalyze');
   const host = window.chrome && window.chrome.webview;
   const post = msg => host ? host.postMessage(msg) : console.log('→ host', msg);
 
   marked.setOptions({ gfm: true, breaks: false });
-  const renderMd = text => DOMPurify.sanitize(marked.parse(text || ''), { ADD_ATTR: ['target'] });
+  // Le HTML brut que marked laisse passer est cloisonné : ni id/name (clobbering), ni style (recouvrement du panneau),
+  // ni éléments de formulaire, ni data-* ; « class » n'est gardé que sur <code class="language-…"> (blocs mermaid).
+  const PURIFY_CFG = {
+    ADD_ATTR: ['target'], ALLOW_DATA_ATTR: false,
+    FORBID_ATTR: ['id', 'name', 'style'],
+    FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea', 'label', 'style'],
+  };
+  let keepClasses = false; // vrai le temps de nettoyer un SVG mermaid, dont le style repose sur ses classes
+  DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+    if (keepClasses || data.attrName !== 'class') return;
+    if (node.tagName !== 'CODE' || !/^language-[\w-]+$/.test(data.attrValue)) data.keepAttr = false;
+  });
+  function renderMd(text) {
+    try { return DOMPurify.sanitize(marked.parse(text || ''), PURIFY_CFG); }
+    catch (e) { console.error(e); return el('pre', 'block wrap', text || '').outerHTML; } // repli : texte brut échappé
+  }
 
   // ---------------------------------------------------------------- diagrammes Mermaid
   let darkTheme = true;
   function initMermaid() {
     if (!window.mermaid) return;
-    mermaid.initialize({ startOnLoad: false, theme: darkTheme ? 'dark' : 'default', securityLevel: 'strict' });
+    mermaid.initialize({ startOnLoad: false, theme: darkTheme ? 'dark' : 'default', securityLevel: 'strict', suppressErrorRendering: true });
   }
   initMermaid();
+
+  // Profil html + svg : mermaid place ses libellés dans des <foreignObject> contenant du HTML, que DOMPurify retire par
+  // défaut (HTML_INTEGRATION_POINTS) ; ce HTML reste soumis aux mêmes règles (ni script, ni on*, ni formulaire).
+  const SVG_CFG = {
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    ADD_TAGS: ['foreignObject'], HTML_INTEGRATION_POINTS: { foreignobject: true },
+    FORBID_TAGS: PURIFY_CFG.FORBID_TAGS,
+  };
+  function sanitizeSvg(svg) {
+    keepClasses = true;
+    try { return DOMPurify.sanitize(svg, SVG_CFG); } finally { keepClasses = false; }
+  }
 
   // Remplace les blocs ```mermaid (une fois le texte complet) par le diagramme rendu
   async function renderDiagrams(container) {
@@ -26,11 +59,11 @@
       div.dataset.src = code.textContent;
       code.parentElement.replaceWith(div);
     }
-    for (const div of container.querySelectorAll('.mermaid:not([data-done])')) {
+    for (const div of container.querySelectorAll('.mermaid[data-src]:not([data-done])')) {
       div.dataset.done = '1';
       try {
         const { svg } = await mermaid.render('mmd' + Math.random().toString(36).slice(2), div.dataset.src);
-        div.innerHTML = svg;
+        div.innerHTML = sanitizeSvg(svg);
       } catch (e) {
         div.classList.add('mermaid-error');
         div.innerHTML = '';
@@ -42,7 +75,7 @@
   }
   function rerenderDiagrams() {
     initMermaid();
-    for (const div of messagesEl.querySelectorAll('.mermaid')) { delete div.dataset.done; div.classList.remove('mermaid-error'); }
+    for (const div of messagesEl.querySelectorAll('.mermaid[data-src]')) { delete div.dataset.done; div.classList.remove('mermaid-error'); }
     renderDiagrams(messagesEl);
   }
 
@@ -51,6 +84,7 @@
   let busy = false;
   let interrupted = false;     // le prochain « result » vient d'une interruption volontaire
   let currentAssistant = null; // conteneur du tour en cours
+  let currentMessageId = null; // id du message API en cours de streaming
   const messages = new Map();  // id message API → { el, blocks: Map(index → bloc) }
   const streamed = new Set();  // messages dont le texte est arrivé en streaming
   const tools = new Map();     // tool_use_id → élément
@@ -65,6 +99,14 @@
     return e;
   }
 
+  // Élément non natif rendu actionnable au clavier (Entrée / Espace) comme un bouton
+  function clickable(node, fn) {
+    node.setAttribute('role', 'button');
+    node.tabIndex = 0;
+    node.addEventListener('click', fn);
+    node.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(e); } });
+  }
+
   function nearBottom() {
     return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80;
   }
@@ -73,15 +115,22 @@
   function scroll() { if (stick) messagesEl.scrollTop = messagesEl.scrollHeight; }
 
   function append(node) {
-    $('welcome')?.remove();
+    welcomeEl.remove(); // détaché, pas détruit : clear() le remet en place
     messagesEl.appendChild(node);
     scroll();
     return node;
   }
 
+  function showRenderError(e) {
+    console.error(e);
+    append(el('div', 'error', 'Erreur d\'affichage : ' + ((e && e.message) || e)));
+  }
+
+  // Chemin relatif au dossier de travail, quel que soit le séparateur (le CLI renvoie parfois des « / »)
   function rel(path) {
     if (!path) return '';
-    if (cwd && path.toLowerCase().startsWith(cwd.toLowerCase() + '\\')) return path.slice(cwd.length + 1);
+    const norm = s => s.replace(/\//g, '\\').toLowerCase();
+    if (cwd && norm(path).startsWith(norm(cwd) + '\\')) return path.slice(cwd.length + 1);
     return path;
   }
 
@@ -98,11 +147,26 @@
   }
 
   function setStatus(state) {
+    const wasBusy = busy;
     busy = state === 'busy';
+    // Plus de tour en cours : l'interruption n'attend plus de « result ». Sur « ready » juste après un tour, c'est le
+    // « result » (posté après le status par ChatController) qui affiche « — interrompu — » et réinitialise lui-même.
+    if (state === 'idle' || (state === 'ready' && !wasBusy)) interrupted = false;
+    // Processus arrêté : plus aucun rejeu n'attribuera d'uuid aux bulles encore en attente
+    if (state === 'idle') for (const b of messagesEl.querySelectorAll('.msg.user[data-pending]')) delete b.dataset.pending;
     statusEl.className = busy ? 'busy' : '';
     statusEl.textContent = { busy: 'Claude travaille…', starting: 'Démarrage de claude…', ready: '', idle: '' }[state] ?? '';
-    $('stop').hidden = !busy;
+    stopEl.hidden = !busy;
+    activityEl.classList.toggle('busy', busy);
   }
+
+  function interrupt() {
+    if (!busy) return;
+    interrupted = true;
+    post({ type: 'interrupt' });
+  }
+  const interruptedDivider = () => append(el('div', 'divider', '— interrompu —'));
+  const toolLabel = name => name.replace(/^mcp__/, '');
 
   // ---------------------------------------------------------------- messages utilisateur
 
@@ -111,12 +175,19 @@
     if (contextLabel) m.appendChild(el('span', 'ctx', '📎 ' + contextLabel));
     if (imgs?.length) {
       const row = m.appendChild(el('div', 'msg-images'));
-      for (const i of imgs) { const im = row.appendChild(el('img')); im.src = i.url; }
+      for (const i of imgs) { const im = row.appendChild(el('img')); im.src = i.url; im.alt = 'Image jointe'; }
     }
     if (text) m.appendChild(document.createTextNode(text));
     if (uuid) setUserUuid(m, uuid);
     append(m);
     currentAssistant = null;
+    return m;
+  }
+
+  // Message créé localement (send, consigne après refus, analyse d'exception) : il attend l'uuid que le CLI rejouera
+  function addOwnMessage(text, contextLabel, imgs) {
+    const m = addUserMessage(text, contextLabel, imgs);
+    m.dataset.pending = '1';
     return m;
   }
 
@@ -129,6 +200,7 @@
     if (bubble.querySelector('.rewind')) return;
     const b = bubble.appendChild(el('button', 'rewind icon', '↶'));
     b.title = 'Remettre les fichiers dans leur état d\'avant ce message';
+    b.setAttribute('aria-label', b.title);
     b.onclick = e => { e.stopPropagation(); post({ type: 'rewind', uuid, dryRun: true }); };
   }
 
@@ -138,15 +210,17 @@
     // On ignore le contexte IDE (<ide_selection>…), les sorties de commandes (<local-command…>) et le résumé de compactage
     const own = blocks.find(c => (c.type === 'text' && typeof c.text === 'string' && !c.text.startsWith('<')) || c.type === 'image');
     if (!own) return;
-    if (own.type === 'text' && own.text.startsWith('This session is being continued')) return;
-    const bubbles = [...messagesEl.querySelectorAll('.msg.user')].filter(b => !b.dataset.uuid);
-    if (bubbles.length && m.uuid) setUserUuid(bubbles[0], m.uuid);
+    if (own.type === 'text' && (own.text.startsWith('This session is being continued') || own.text.startsWith('[Request interrupted'))) return;
+    // Le CLI rejoue les messages dans l'ordre d'envoi : la plus ancienne bulle encore en attente reçoit l'uuid
+    // (jamais une vieille bulle de l'historique, qui n'est pas marquée en attente)
+    const bubble = messagesEl.querySelector('.msg.user[data-pending]');
+    if (bubble && m.uuid) { delete bubble.dataset.pending; setUserUuid(bubble, m.uuid); }
   }
 
   let rewindCard = null;
   function onRewindPreview(m) {
     rewindCard?.remove();
-    const bubble = messagesEl.querySelector(`.msg.user[data-uuid="${m.uuid}"]`);
+    const bubble = messagesEl.querySelector(`.msg.user[data-uuid="${CSS.escape(m.uuid || '')}"]`);
     const card = el('div', 'perm rewind-card');
     rewindCard = card;
     if (!m.ok || !m.canRewind) {
@@ -192,14 +266,18 @@
 
   function textBlock(container) {
     const div = container.appendChild(el('div', 'md'));
-    const block = { type: 'text', el: div, text: '', pending: false };
+    const block = { type: 'text', el: div, text: '', raf: 0 };
+    // Les deltas sont coalescés par frame ; finalize annule le rendu différé pour qu'il n'écrase pas les diagrammes
     block.render = () => {
-      if (block.pending) return;
-      block.pending = true;
-      requestAnimationFrame(() => { block.pending = false; div.innerHTML = renderMd(block.text); scroll(); });
+      if (block.raf) return;
+      block.raf = requestAnimationFrame(() => { block.raf = 0; div.innerHTML = renderMd(block.text); scroll(); });
     };
     // Texte complet : rendu immédiat puis diagrammes
-    block.finalize = () => { block.pending = false; div.innerHTML = renderMd(block.text); renderDiagrams(div); };
+    block.finalize = () => {
+      cancelAnimationFrame(block.raf); block.raf = 0;
+      div.innerHTML = renderMd(block.text);
+      renderDiagrams(div);
+    };
     return block;
   }
 
@@ -243,7 +321,6 @@
       }
     }
   }
-  let currentMessageId = null;
 
   // Activité d'un sous-agent : liste de ses outils sous l'outil Task/Agent parent
   const subTools = new Map(); // tool_use_id du sous-agent → ligne
@@ -254,12 +331,12 @@
     if (!list) {
       list = el('div', 'sub');
       parent.querySelector('.tool-body').prepend(list);
-      parent.classList.add('open');
+      setOpen(parent, true);
     }
     for (const c of m.message.content || []) {
       if (c.type !== 'tool_use' || subTools.has(c.id)) continue;
       const line = list.appendChild(el('div', 'sub-line running'));
-      line.appendChild(el('span', 'name', c.name.replace(/^mcp__/, '')));
+      line.appendChild(el('span', 'name', toolLabel(c.name)));
       line.appendChild(el('span', 'summary', ' ' + toolSummary(c.name, c.input)));
       subTools.set(c.id, line);
       parent.querySelector('.state').textContent = list.children.length + ' outils ';
@@ -333,26 +410,33 @@
     return frag;
   }
 
+  // Déplie / replie le corps d'un outil (et tient l'état ARIA de son en-tête à jour)
+  function setOpen(t, open) {
+    t.classList.toggle('open', open);
+    t.querySelector('.tool-head').setAttribute('aria-expanded', open);
+  }
+
   function toolElement(id, name, input, container) {
     let t = tools.get(id);
     if (!t) {
       t = el('div', 'tool running');
+      t.dataset.tool = name;
       const head = t.appendChild(el('div', 'tool-head'));
-      head.appendChild(el('span', 'name', name.replace(/^mcp__/, '')));
+      head.appendChild(el('span', 'name', toolLabel(name)));
       head.appendChild(el('span', 'summary'));
       head.appendChild(el('span', 'state'));
-      head.addEventListener('click', () => t.classList.toggle('open'));
+      head.setAttribute('aria-expanded', 'false');
+      clickable(head, () => setOpen(t, !t.classList.contains('open')));
       t.appendChild(el('div', 'tool-body'));
       container.appendChild(t);
       tools.set(id, t);
-      t.toolName = name;
       scroll();
     }
-    if (input && !t.hasInput) {
-      t.hasInput = true;
+    if (input && !t.dataset.input) {
+      t.dataset.input = '1';
       t.querySelector('.summary').textContent = toolSummary(name, input);
       t.querySelector('.tool-body').prepend(toolDetails(name, input));
-      if (name === 'TodoWrite') t.classList.add('open');
+      if (name === 'TodoWrite') setOpen(t, true);
     }
     return t;
   }
@@ -364,14 +448,14 @@
     t.classList.add(r.is_error ? 'error' : 'ok');
     const sub = t.querySelector('.sub');
     t.querySelector('.state').textContent = (sub ? sub.children.length + ' outils ' : '') + (r.is_error ? '✗' : '✓');
-    if (sub && !r.is_error) t.classList.remove('open'); // sous-agent terminé : on replie
+    if (sub && !r.is_error) setOpen(t, false); // sous-agent terminé : on replie
     let text = r.content;
     if (Array.isArray(text)) text = text.map(c => c.type === 'text' ? c.text : `[${c.type}]`).join('\n');
-    if (text && t.toolName !== 'TodoWrite') {
+    if (text && t.dataset.tool !== 'TodoWrite') {
       const pre = el('pre', 'block wrap', text.length > 4000 ? text.slice(0, 4000) + '\n…' : text);
       t.querySelector('.tool-body').appendChild(pre);
     }
-    if (r.is_error) t.classList.add('open');
+    if (r.is_error) setOpen(t, true);
   }
 
   // ---------------------------------------------------------------- permissions
@@ -389,7 +473,7 @@
     const req = m.request, id = m.request_id, input = req.input || {};
     const card = el('div', 'perm');
     perms.set(id, card);
-    const append = node => placeCard(node, req.tool_use_id);
+    const place = node => placeCard(node, req.tool_use_id);
     const respond = response => post({ type: 'permission', requestId: id, response });
     // Refus avec consigne : on interrompt le tour puis la consigne part comme un vrai message utilisateur
     // (un motif glissé dans le résultat d'outil est traité par le modèle comme une donnée, pas une instruction).
@@ -397,11 +481,11 @@
       if (!reasonText) return respond({ behavior: 'deny', message: fallback });
       interrupted = true;
       respond({ behavior: 'deny', message: 'L\'utilisateur a refusé cette action et va préciser ce qu\'il veut.', interrupt: true });
-      addUserMessage(reasonText);
+      addOwnMessage(reasonText);
       post({ type: 'send', text: reasonText });
     };
 
-    if (req.tool_name === 'AskUserQuestion') return append(questionCard(card, input, respond));
+    if (req.tool_name === 'AskUserQuestion') return place(questionCard(card, input, respond));
 
     if (req.tool_name === 'ExitPlanMode') {
       card.appendChild(el('div', 'title', 'Claude propose un plan'));
@@ -414,7 +498,8 @@
       reason.type = 'text'; reason.placeholder = 'Ou expliquer ce qu\'il faut changer…';
       const no = actions.appendChild(el('button', null, 'Continuer à planifier'));
       no.onclick = () => denyWith(reason.value.trim(), 'L\'utilisateur veut continuer à affiner le plan.');
-      return append(card);
+      reason.addEventListener('keydown', e => { if (e.key === 'Enter') no.click(); });
+      return place(card);
     }
 
     card.appendChild(el('div', 'title', `Autoriser ${req.display_name || req.tool_name} ?`));
@@ -432,7 +517,7 @@
       always.onclick = () => {
         respond({ behavior: 'allow', updatedPermissions: req.permission_suggestions });
         const mode = req.permission_suggestions.find(s => s.type === 'setMode');
-        if (mode) $('mode').value = mode.mode;
+        if (mode) modeEl.value = mode.mode;
       };
     }
     if (isEdit) {
@@ -444,7 +529,7 @@
     const deny = actions.appendChild(el('button', null, 'Refuser'));
     deny.onclick = () => denyWith(reason.value.trim(), 'L\'utilisateur a refusé.');
     reason.addEventListener('keydown', e => { if (e.key === 'Enter') deny.click(); });
-    return append(card);
+    return place(card);
   }
 
   function alwaysLabel(suggestions) {
@@ -455,94 +540,126 @@
 
   function questionCard(card, input, respond) {
     card.appendChild(el('div', 'title', 'Claude a une question'));
-    const answers = {};
-    for (const q of input.questions || []) {
+    const questions = input.questions || [];
+    // Un état par question, indexé par position (deux questions ou options de même libellé ne se confondent pas)
+    const state = questions.map(() => ({ chosen: new Set(), other: '' }));
+    const answerOf = (q, s) => s.other || (q.options || []).filter(o => s.chosen.has(o)).map(o => o.label).join(', ');
+    const actions = el('div', 'actions');
+    const ok = actions.appendChild(el('button', 'primary', 'Répondre'));
+    const refresh = () => { ok.disabled = !questions.every((q, i) => answerOf(q, state[i])); };
+    questions.forEach((q, i) => {
+      const s = state[i];
       const box = card.appendChild(el('div', 'question'));
       box.appendChild(el('div', 'q', q.question));
       const opts = box.appendChild(el('div', 'opts'));
-      const chosen = new Set();
+      const buttons = [];
+      const other = el('input');
+      const sync = () => buttons.forEach(([b, o]) => { const on = s.chosen.has(o); b.classList.toggle('selected', on); b.setAttribute('aria-pressed', on); });
       for (const o of q.options || []) {
         const b = opts.appendChild(el('button', 'opt', o.label));
+        b.setAttribute('aria-pressed', 'false');
         if (o.description) b.appendChild(el('small', null, o.description));
+        buttons.push([b, o]);
         b.onclick = () => {
-          if (!q.multiSelect) { chosen.clear(); opts.querySelectorAll('.opt').forEach(x => x.classList.remove('selected')); }
-          chosen.has(o.label) ? chosen.delete(o.label) : chosen.add(o.label);
-          b.classList.toggle('selected', chosen.has(o.label));
-          answers[q.question] = [...chosen].join(', ');
+          const on = s.chosen.has(o);
+          if (!q.multiSelect) s.chosen.clear();
+          on ? s.chosen.delete(o) : s.chosen.add(o);
+          s.other = other.value = ''; // une option choisie remplace la réponse libre
+          sync(); refresh();
         };
       }
-      const other = opts.appendChild(el('input'));
+      opts.appendChild(other);
       other.type = 'text'; other.placeholder = 'Autre réponse…';
-      other.oninput = () => { if (other.value) answers[q.question] = other.value; };
-    }
-    const actions = card.appendChild(el('div', 'actions'));
-    const ok = actions.appendChild(el('button', 'primary', 'Répondre'));
-    ok.onclick = () => respond({ behavior: 'allow', updatedInput: { ...input, answers } });
+      other.oninput = () => { s.other = other.value.trim(); if (s.other) { s.chosen.clear(); sync(); } refresh(); };
+      other.addEventListener('keydown', e => { if (e.key === 'Enter' && !ok.disabled) ok.click(); });
+    });
+    card.appendChild(actions);
+    // Le CLI attend les réponses indexées par le texte de la question ; on les reconstruit depuis l'état par position
+    ok.onclick = () => {
+      const answers = {};
+      questions.forEach((q, i) => { answers[q.question] = answerOf(q, state[i]); });
+      respond({ behavior: 'allow', updatedInput: { ...input, answers } });
+    };
     const no = actions.appendChild(el('button', null, 'Ignorer'));
     no.onclick = () => respond({ behavior: 'deny', message: 'L\'utilisateur n\'a pas répondu à la question.' });
+    refresh();
     return card;
   }
 
+  // behavior : 'allow' | 'deny' | 'cancelled' (demande abandonnée par le C# : processus arrêté, tour terminé, control_cancel_request)
   function onPermissionResolved(id, behavior) {
     const card = perms.get(id);
     if (!card) return;
     card.classList.add('resolved');
-    card.appendChild(el('div', 'outcome', behavior === 'allow' ? '✓ Autorisé' : '✗ Refusé'));
+    card.querySelectorAll('button, input').forEach(x => { x.disabled = true; });
+    card.appendChild(el('div', 'outcome', behavior === 'allow' ? '✓ Autorisé' : behavior === 'cancelled' ? 'Demande expirée' : '✗ Refusé'));
     perms.delete(id);
   }
 
   // ---------------------------------------------------------------- flux du CLI
 
   function onCli(m) {
-    switch (m.type) {
-      case 'stream_event': return onStreamEvent(m);
-      case 'assistant': return onAssistant(m);
-      case 'user': {
-        const content = m.message?.content;
-        if (m.parent_tool_use_id) return Array.isArray(content) && onSubagentResults(content);
-        if (Array.isArray(content) && content.some(c => c.type === 'tool_result')) {
-          for (const c of content) if (c.type === 'tool_result') onToolResult(c);
+    try {
+      switch (m.type) {
+        case 'stream_event': return onStreamEvent(m);
+        case 'assistant': return onAssistant(m);
+        case 'user': {
+          const content = m.message?.content;
+          if (m.parent_tool_use_id) return Array.isArray(content) && onSubagentResults(content);
+          if (Array.isArray(content) && content.some(c => c.type === 'tool_result')) {
+            for (const c of content) if (c.type === 'tool_result') onToolResult(c);
+            return;
+          }
+          return onUserReplay(m);
+        }
+        case 'control_request':
+          if (m.request?.subtype === 'can_use_tool') permissionCard(m);
+          return;
+        case 'control_response': {
+          const r = m.response;
+          // Refus d'un set_model / set_permission_mode… : sans ce message, le sélecteur afficherait une valeur non appliquée
+          if (r?.subtype === 'error') append(el('div', 'error', 'Commande refusée par le CLI : ' + (r.error || 'erreur inconnue')));
+          if (r?.response?.commands) commands = r.response.commands;
           return;
         }
-        return onUserReplay(m);
-      }
-      case 'control_request':
-        if (m.request?.subtype === 'can_use_tool') permissionCard(m);
-        return;
-      case 'control_response': {
-        const r = m.response?.response;
-        if (r?.commands) commands = r.commands;
-        return;
-      }
-      case 'system':
-        if (m.subtype === 'init') {
-          if (m.slash_commands && !commands.length) commands = m.slash_commands.map(name => ({ name, description: '' }));
-        } else if (m.subtype === 'compact_boundary') append(el('div', 'divider', '— contexte compacté —'));
-        else if (m.subtype === 'status') {
-          if (m.status === 'compacting') { statusEl.className = 'busy'; statusEl.textContent = 'Compactage du contexte…'; }
-          else if (m.status === null && m.compact_result && !busy) setStatus('ready');
+        case 'system':
+          if (m.subtype === 'init') {
+            if (m.slash_commands && !commands.length) commands = m.slash_commands.map(name => ({ name, description: '' }));
+          } else if (m.subtype === 'compact_boundary') append(el('div', 'divider', '— contexte compacté —'));
+          else if (m.subtype === 'status') {
+            if (m.status === 'compacting') { statusEl.className = 'busy'; statusEl.textContent = 'Compactage du contexte…'; }
+            else if (m.status == null) setStatus(busy ? 'busy' : 'ready'); // fin du compactage : retour à l'état réel du tour
+          }
+          return;
+        case 'result': {
+          currentAssistant = null;
+          // Erreur et interruption sont affichées indépendamment : une interruption ne doit pas masquer une vraie erreur.
+          // Le « result » d'un tour interrompu est lui-même en erreur (« Request interrupted… ») : celui-là n'est pas une erreur.
+          const errText = m.result || m.errors?.join('\n') || ('Erreur : ' + m.subtype);
+          const isInterruptResult = interrupted && /interrupt/i.test(errText + ' ' + (m.subtype || ''));
+          if ((m.is_error || (m.subtype && m.subtype !== 'success')) && !isInterruptResult) append(el('div', 'error', errText));
+          if (interrupted) interruptedDivider();
+          interrupted = false;
+          const parts = [];
+          if (m.duration_ms) parts.push((m.duration_ms / 1000).toFixed(1) + ' s');
+          if (m.total_cost_usd) parts.push(m.total_cost_usd.toFixed(3) + ' $');
+          if (parts.length) append(el('div', 'result', parts.join(' · ')));
+          return;
         }
-        return;
-      case 'result': {
-        currentAssistant = null;
-        if (interrupted) append(el('div', 'divider', '— interrompu —'));
-        else if (m.is_error || (m.subtype && m.subtype !== 'success'))
-          append(el('div', 'error', m.result || m.errors?.join('\n') || ('Erreur : ' + m.subtype)));
-        interrupted = false;
-        const parts = [];
-        if (m.duration_ms) parts.push((m.duration_ms / 1000).toFixed(1) + ' s');
-        if (m.total_cost_usd) parts.push(m.total_cost_usd.toFixed(3) + ' $');
-        if (parts.length) append(el('div', 'result', parts.join(' · ')));
-        return;
       }
-    }
+    } catch (e) { showRenderError(e); }
   }
 
-  function renderHistory(list) {
+  // L'historique peut arriver en plusieurs lots : le séparateur n'est posé qu'avec le dernier
+  function renderHistory(list, last) {
     for (const m of list) {
       if (m.type === 'user') {
         const content = m.message?.content;
-        if (typeof content === 'string') { if (!content.startsWith('<')) addUserMessage(content); continue; }
+        if (typeof content === 'string') {
+          if (content.startsWith('[Request interrupted')) interruptedDivider();
+          else if (!content.startsWith('<')) addUserMessage(content, null, null, m.uuid);
+          continue;
+        }
         let text = [], ctx = null, imgs = [];
         for (const c of content || []) {
           if (c.type === 'tool_result') onToolResult(c);
@@ -556,84 +673,91 @@
             else if (!c.text.startsWith('<')) text.push(c.text);
           }
         }
-        if (text.length === 1 && text[0].startsWith('[Request interrupted')) append(el('div', 'divider', '— interrompu —'));
+        if (text.length === 1 && text[0].startsWith('[Request interrupted')) interruptedDivider();
         else if (text.length || imgs.length) addUserMessage(text.join('\n'), ctx, imgs, m.uuid);
       } else if (m.type === 'assistant') onAssistant(m);
     }
-    append(el('div', 'divider', '— conversation reprise —'));
+    if (last) append(el('div', 'divider', '— conversation reprise —'));
   }
 
   function clear() {
-    messagesEl.innerHTML = '';
+    messagesEl.replaceChildren(welcomeEl);
     messages.clear(); streamed.clear(); tools.clear(); perms.clear(); subTools.clear();
-    currentAssistant = null; rewindCard = null;
-    $('context').hidden = true;
+    currentAssistant = null; currentMessageId = null; rewindCard = null; interrupted = false;
+    contextEl.hidden = true;
   }
 
   // ---------------------------------------------------------------- messages de l'extension
 
   host?.addEventListener('message', e => {
     const m = e.data;
-    switch (m.type) {
-      case 'cli': return onCli(m.msg);
-      case 'status': return setStatus(m.state);
-      case 'error': return append(el('div', 'error', m.text));
-      case 'permissionResolved': return onPermissionResolved(m.requestId, m.behavior);
-      case 'cleared': return clear();
-      case 'history': return renderHistory(m.messages || []);
-      case 'insert': {
-        const pos = inputEl.selectionStart ?? inputEl.value.length;
-        inputEl.value = inputEl.value.slice(0, pos) + m.text + inputEl.value.slice(pos);
-        inputEl.focus();
-        inputEl.selectionStart = inputEl.selectionEnd = pos + m.text.length;
-        return;
+    try {
+      switch (m.type) {
+        case 'cli': return onCli(m.msg);
+        case 'status': return setStatus(m.state);
+        case 'error': return append(el('div', 'error', m.text));
+        case 'permissionResolved': return onPermissionResolved(m.requestId, m.behavior);
+        case 'cleared': return clear();
+        case 'history': return renderHistory(m.messages || [], m.last ?? true);
+        case 'insert': {
+          const pos = inputEl.selectionStart ?? inputEl.value.length;
+          inputEl.value = inputEl.value.slice(0, pos) + m.text + inputEl.value.slice(pos);
+          inputEl.focus();
+          inputEl.selectionStart = inputEl.selectionEnd = pos + m.text.length;
+          resizeInput();
+          return;
+        }
+        case 'selection':
+          selectionEl.hidden = !m.label;
+          selectionEl.textContent = '📎 ' + (m.label || '');
+          return;
+        case 'focus': inputEl.focus(); return;
+        case 'notice': return append(el('div', 'notice', m.text));
+        case 'debugEvent': return onDebugEvent(m);
+        case 'context': return onContext(m);
+        case 'rewindPreview': return onRewindPreview(m);
+        case 'rewindDone': return onRewindDone(m);
+        case 'settings':
+          modelEl.value = m.model || '';
+          effortEl.value = m.effort || '';
+          modeEl.value = m.mode;
+          selectionEl.classList.toggle('off', !m.attachSelection);
+          autoFormatEl.classList.toggle('off', !m.autoFormat);
+          autoAnalyzeEl.classList.toggle('off', !m.autoAnalyze);
+          cwd = m.cwd || '';
+          cwdEl.textContent = cwd;
+          return;
+        case 'sessions': return showSessions(m.sessions || []);
+        case 'files': return onFiles(m);
+        case 'theme':
+          for (const [k, v] of Object.entries(m.vars || {})) document.documentElement.style.setProperty(k, v);
+          document.documentElement.style.colorScheme = m.dark ? 'dark' : 'light';
+          document.documentElement.classList.toggle('light', !m.dark); // seconde palette sémantique (style.css)
+          if (darkTheme !== !!m.dark) { darkTheme = !!m.dark; rerenderDiagrams(); }
+          return;
       }
-      case 'selection': {
-        const chip = $('selection');
-        chip.hidden = !m.label;
-        chip.textContent = '📎 ' + (m.label || '');
-        return;
-      }
-      case 'focus': inputEl.focus(); return;
-      case 'notice': return append(el('div', 'notice', m.text));
-      case 'debugEvent': return onDebugEvent(m);
-      case 'context': return onContext(m);
-      case 'rewindPreview': return onRewindPreview(m);
-      case 'rewindDone': return onRewindDone(m);
-      case 'settings':
-        $('model').value = m.model || '';
-        $('effort').value = m.effort || '';
-        $('mode').value = m.mode;
-        $('selection').classList.toggle('off', !m.attachSelection);
-        $('autoFormat').classList.toggle('off', !m.autoFormat);
-        $('autoAnalyze').classList.toggle('off', !m.autoAnalyze);
-        cwd = m.cwd || '';
-        $('cwd').textContent = cwd;
-        return;
-      case 'sessions': return showSessions(m.sessions || []);
-      case 'files': return onFiles(m);
-      case 'theme':
-        for (const [k, v] of Object.entries(m.vars || {})) document.documentElement.style.setProperty(k, v);
-        document.documentElement.style.colorScheme = m.dark ? 'dark' : 'light';
-        if (darkTheme !== !!m.dark) { darkTheme = !!m.dark; rerenderDiagrams(); }
-        return;
-    }
+    } catch (err) { showRenderError(err); }
   });
 
   // ---------------------------------------------------------------- saisie
 
+  function resizeInput() {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight + 2, window.innerHeight * 0.4) + 'px';
+  }
+
   function send() {
     const text = inputEl.value.trim();
     if (!text && !images.length) return;
-    const chip = $('selection');
-    const ctx = !chip.hidden && !chip.classList.contains('off') ? chip.textContent.replace(/^📎 /, '') : null;
-    addUserMessage(text, ctx, images);
+    const ctx = !selectionEl.hidden && !selectionEl.classList.contains('off') ? selectionEl.textContent.replace(/^📎 /, '') : null;
+    addOwnMessage(text, ctx, images);
     stick = true; scroll();
     post({ type: 'send', text, images: images.map(i => ({ mediaType: i.mediaType, data: i.data })) });
     inputEl.value = '';
     images = [];
     renderAttachments();
     hidePopup();
+    resizeInput();
   }
 
   // ---------------------------------------------------------------- images jointes
@@ -643,9 +767,12 @@
 
   function addImageFile(file) {
     if (!file || !file.type.startsWith('image/')) return;
+    const fail = () => append(el('div', 'notice', 'Image illisible, non jointe : ' + (file.name || file.type)));
     const reader = new FileReader();
+    reader.onerror = fail;
     reader.onload = () => {
       const img = new Image();
+      img.onerror = fail;
       img.onload = () => {
         const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
         let url = reader.result;
@@ -668,15 +795,15 @@
   }
 
   function renderAttachments() {
-    const box = $('attachments');
-    box.innerHTML = '';
-    box.hidden = !images.length;
+    attachmentsEl.innerHTML = '';
+    attachmentsEl.hidden = !images.length;
     images.forEach((img, i) => {
-      const thumb = box.appendChild(el('div', 'thumb'));
+      const thumb = attachmentsEl.appendChild(el('div', 'thumb'));
       const im = thumb.appendChild(el('img'));
-      im.src = img.url;
+      im.src = img.url; im.alt = 'Image jointe ' + (i + 1);
       const x = thumb.appendChild(el('button', 'remove', '✕'));
       x.title = 'Retirer';
+      x.setAttribute('aria-label', 'Retirer l\'image ' + (i + 1));
       x.onclick = () => { images.splice(i, 1); renderAttachments(); };
     });
   }
@@ -692,20 +819,20 @@
     e.preventDefault();
     [...(e.dataTransfer?.files || [])].forEach(addImageFile);
   });
-  $('attach').onclick = () => $('fileInput').click();
-  $('fileInput').onchange = e => { [...e.target.files].forEach(addImageFile); e.target.value = ''; };
+  $('attach').onclick = () => fileInputEl.click();
+  fileInputEl.onchange = e => { [...e.target.files].forEach(addImageFile); e.target.value = ''; };
 
   function setMode(mode) {
-    $('mode').value = mode;
+    modeEl.value = mode;
     post({ type: 'setMode', mode });
   }
 
   $('send').onclick = send;
   // Toute la pastille « Claude travaille… | ■ Arrêter » est cliquable, pas seulement le bouton.
-  $('activity').onclick = () => { if ($('stop').hidden) return; interrupted = true; post({ type: 'interrupt' }); };
-  $('mode').onchange = e => post({ type: 'setMode', mode: e.target.value });
-  $('model').onchange = e => post({ type: 'setModel', model: e.target.value });
-  $('effort').onchange = e => post({ type: 'setEffort', effort: e.target.value });
+  activityEl.onclick = interrupt;
+  modeEl.onchange = e => post({ type: 'setMode', mode: e.target.value });
+  modelEl.onchange = e => post({ type: 'setModel', model: e.target.value });
+  effortEl.onchange = e => post({ type: 'setEffort', effort: e.target.value });
   $('compact').onclick = () => {
     if (busy) return;
     append(el('div', 'divider', '— compactage demandé —'));
@@ -713,24 +840,23 @@
   };
 
   function onContext(m) {
-    const box = $('context');
-    if (!m.total) { box.hidden = true; return; }
+    if (!m.total) { contextEl.hidden = true; return; }
     const pct = Math.round(100 * m.used / m.total);
-    box.hidden = false;
-    box.querySelector('.fill').style.width = pct + '%';
-    box.querySelector('.pct').textContent = `${pct} %`;
-    box.classList.toggle('warn', pct >= 70 && pct < 90);
-    box.classList.toggle('danger', pct >= 90);
+    contextEl.hidden = false;
+    contextEl.querySelector('.fill').style.width = pct + '%';
+    contextEl.querySelector('.pct').textContent = `${pct} %`;
+    contextEl.classList.toggle('warn', pct >= 70 && pct < 90);
+    contextEl.classList.toggle('danger', pct >= 90);
     const k = n => (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k';
-    box.title = `Contexte : ${k(m.used)} / ${k(m.total)} tokens\n` +
+    contextEl.title = `Contexte : ${k(m.used)} / ${k(m.total)} tokens\n` +
       (m.details || []).map(d => `${d.name} : ${k(d.tokens)}`).join('\n');
   }
   $('newChat').onclick = () => { clear(); post({ type: 'newChat' }); };
   $('history').onclick = () => post({ type: 'listSessions' });
-  $('closeSessions').onclick = () => { $('sessions').hidden = true; };
-  $('selection').onclick = () => post({ type: 'setAttachSelection', value: $('selection').classList.contains('off') });
-  $('autoFormat').onclick = () => post({ type: 'setAutoFormat', value: $('autoFormat').classList.contains('off') });
-  $('autoAnalyze').onclick = () => post({ type: 'setAutoAnalyze', value: $('autoAnalyze').classList.contains('off') });
+  $('closeSessions').onclick = () => { sessionsEl.hidden = true; };
+  selectionEl.onclick = () => post({ type: 'setAttachSelection', value: selectionEl.classList.contains('off') });
+  autoFormatEl.onclick = () => post({ type: 'setAutoFormat', value: autoFormatEl.classList.contains('off') });
+  autoAnalyzeEl.onclick = () => post({ type: 'setAutoAnalyze', value: autoAnalyzeEl.classList.contains('off') });
 
   // Le débogueur de VS s'est arrêté sur une exception en dehors d'un appel d'outil
   function onDebugEvent(m) {
@@ -743,50 +869,53 @@
     detail.textContent = (ex ? `${ex.type}\n${ex.value}\n` : '') + (loc ? `${rel(loc.file || '')}:${loc.line ?? '?'}  ${loc.function || ''}` : '');
     if (m.auto) {
       card.appendChild(el('div', 'outcome', 'Analyse demandée à Claude.'));
-      addUserMessage('⚡ Analyse de l\'exception');
+      addOwnMessage('⚡ Analyse de l\'exception');
     } else {
       const actions = card.appendChild(el('div', 'actions'));
       const b = actions.appendChild(el('button', 'primary', 'Analyser avec Claude'));
-      b.onclick = () => { b.disabled = true; addUserMessage('⚡ Analyse de l\'exception'); post({ type: 'analyzeException' }); };
+      b.onclick = () => { b.disabled = true; addOwnMessage('⚡ Analyse de l\'exception'); post({ type: 'analyzeException' }); };
     }
     append(card);
     if (m.auto) stick = true;
   }
 
   function showSessions(list) {
-    const box = $('sessionList');
-    box.innerHTML = '';
-    if (!list.length) box.appendChild(el('div', 'session', 'Aucune conversation pour ce dossier.'));
+    sessionListEl.innerHTML = '';
+    if (!list.length) sessionListEl.appendChild(el('div', 'session', 'Aucune conversation pour ce dossier.'));
     for (const s of list) {
-      const row = box.appendChild(el('div', 'session'));
+      const row = sessionListEl.appendChild(el('div', 'session'));
       row.appendChild(el('div', null, s.title));
       row.appendChild(el('div', 'when', s.updated));
-      row.onclick = () => { $('sessions').hidden = true; post({ type: 'resume', sessionId: s.id }); };
+      clickable(row, () => { sessionsEl.hidden = true; post({ type: 'resume', sessionId: s.id }); });
     }
-    $('sessions').hidden = false;
+    sessionsEl.hidden = false;
   }
 
   // ---------------------------------------------------------------- suggestions « / » et « @ »
   // Une suggestion = { label, detail, apply() } ; la liste s'affiche au-dessus de la zone de saisie.
 
   let popupItems = [], popupIndex = 0;
-  let fileSeq = 0, fileQuery = null, fileTimer = null;
+  let fileSeq = 0, fileQuery = null, fileTimer = null, pendingFileSearch = null;
 
   function showPopup(items) {
     popupItems = items;
     if (!items.length) return hidePopup();
     popupIndex = Math.min(popupIndex, items.length - 1);
-    const box = $('slash');
-    box.innerHTML = '';
+    slashEl.innerHTML = '';
     items.forEach((it, i) => {
-      const row = box.appendChild(el('div', 'item' + (i === popupIndex ? ' active' : ''), it.label));
+      const row = slashEl.appendChild(el('div', 'item' + (i === popupIndex ? ' active' : ''), it.label));
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', i === popupIndex);
       if (it.detail) row.appendChild(el('small', null, it.detail));
       row.onmousedown = e => { e.preventDefault(); pick(i); };
     });
-    box.hidden = false;
-    box.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+    slashEl.hidden = false;
+    slashEl.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
   }
-  function hidePopup() { $('slash').hidden = true; popupItems = []; popupIndex = 0; fileQuery = null; }
+  function hidePopup() {
+    slashEl.hidden = true; popupItems = []; popupIndex = 0;
+    clearTimeout(fileTimer); fileQuery = null; pendingFileSearch = null; // une recherche « @ » en vol ne doit pas rouvrir la liste
+  }
   function pick(i) { const it = popupItems[i]; hidePopup(); it.apply(); inputEl.focus(); }
 
   // Remplace le jeton en cours de frappe (de start au curseur) par du texte
@@ -794,6 +923,7 @@
     const end = inputEl.selectionStart;
     inputEl.value = inputEl.value.slice(0, start) + text + inputEl.value.slice(end);
     inputEl.selectionStart = inputEl.selectionEnd = start + text.length;
+    resizeInput();
   }
 
   function updateSuggestions() {
@@ -824,7 +954,6 @@
     }
     hidePopup();
   }
-  let pendingFileSearch = null;
 
   function onFiles(m) {
     if (!pendingFileSearch || m.seq !== pendingFileSearch.seq) return; // réponse périmée
@@ -839,22 +968,18 @@
     }));
   }
 
-  inputEl.addEventListener('input', () => {
-    updateSuggestions();
-    inputEl.style.height = 'auto';
-    inputEl.style.height = Math.min(inputEl.scrollHeight + 2, window.innerHeight * 0.4) + 'px';
-  });
+  inputEl.addEventListener('input', () => { updateSuggestions(); resizeInput(); });
   inputEl.addEventListener('click', updateSuggestions);
   inputEl.addEventListener('blur', () => setTimeout(hidePopup, 150));
   inputEl.addEventListener('keydown', e => {
-    if (!$('slash').hidden && popupItems.length) {
+    if (!slashEl.hidden && popupItems.length) {
       if (e.key === 'ArrowDown') { popupIndex = (popupIndex + 1) % popupItems.length; showPopup(popupItems); e.preventDefault(); return; }
       if (e.key === 'ArrowUp') { popupIndex = (popupIndex - 1 + popupItems.length) % popupItems.length; showPopup(popupItems); e.preventDefault(); return; }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { pick(popupIndex); e.preventDefault(); return; }
       if (e.key === 'Escape') { hidePopup(); e.preventDefault(); return; }
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-    else if (e.key === 'Escape' && busy) { interrupted = true; post({ type: 'interrupt' }); }
+    else if (e.key === 'Escape') interrupt();
   });
 
   post({ type: 'ready' });
