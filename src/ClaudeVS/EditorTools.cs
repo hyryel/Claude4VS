@@ -16,15 +16,13 @@ namespace ClaudeVS
     /// <summary>
     /// Formatage de documents et signets, via les commandes de VS (il n'existe pas d'API publique pour les signets).
     /// </summary>
-    internal sealed class EditorTools
+    internal sealed class EditorTools : ToolGroup
     {
-        public static readonly HashSet<string> Names = new HashSet<string> { "formatDocument", "bookmarkList", "bookmarkToggle" };
-
         private readonly AsyncPackage _package;
 
         public EditorTools(AsyncPackage package) => _package = package;
 
-        public static JArray Definitions() => new JArray
+        public override JArray Definitions() => new JArray
         {
             IdeTools.Tool("formatDocument", "Format a source file with Visual Studio's Format Document (Ctrl+K, Ctrl+D), using the user's formatting settings, and save it.", new JObject
             {
@@ -47,7 +45,7 @@ namespace ClaudeVS
             }
         }
 
-        public async Task<JObject> CallAsync(string name, JObject args)
+        public override async Task<JObject> CallAsync(string name, JObject args, System.Threading.CancellationToken ct)
         {
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
             switch (name)

@@ -20,6 +20,11 @@ namespace ClaudeVS
         public static event Action<JObject> Changed;
         public static JObject Latest { get; private set; }
 
+        private static Log _log;
+
+        /// <summary>Fournit le journal (le suiveur est instancié par MEF : pas d'injection par constructeur possible).</summary>
+        public static void Start(Log log) => _log = log;
+
         private static DispatcherTimer _debounce;
         private static IWpfTextView _pendingView;
 
@@ -60,7 +65,7 @@ namespace ClaudeVS
                     }
                     catch (Exception ex)
                     {
-                        ClaudeVSPackage.Instance?.Log.Error("Suivi de la sélection : " + ex.Message);
+                        _log?.Error("Suivi de la sélection : " + ex.Message);
                     }
                 };
             }

@@ -20,14 +20,23 @@ namespace ClaudeVS
         /// <summary>Le débogueur vient de s'arrêter sur une exception (état complet : position, pile, exception).</summary>
         public static event Action<JObject> BreakOnException;
 
-        private DebugMonitor(DebugTools tools) => _tools = tools;
+        private readonly Log _log;
+        private readonly Action _ensureChatVisible;
 
-        /// <param name="tools">L'instance d'IdeTools, pour voir ses attentes en cours (IsWaiting).</param>
-        public static void Start(DebugTools tools)
+        private DebugMonitor(DebugTools tools, Log log, Action ensureChatVisible)
+        {
+            _tools = tools;
+            _log = log;
+            _ensureChatVisible = ensureChatVisible;
+        }
+
+        /// <param name="tools">Le groupe d'outils de débogage, pour voir ses attentes en cours (IsWaiting).</param>
+        /// <param name="ensureChatVisible">Réaffiche le panneau du chat s'il avait été ouvert.</param>
+        public static void Start(DebugTools tools, Log log, Action ensureChatVisible)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (_instance != null) return;
-            _instance = new DebugMonitor(tools);
+            _instance = new DebugMonitor(tools, log, ensureChatVisible);
             var dte = (DTE2)Package.GetGlobalService(typeof(SDTE));
             _instance._events = dte.Events.DebuggerEvents;
             _instance._events.OnEnterBreakMode += _instance.OnEnterBreakMode;
@@ -39,7 +48,7 @@ namespace ClaudeVS
             ThreadHelper.ThrowIfNotOnUIThread();
             // Passage à la disposition « débogage » : le panneau ouvert en conception n'y est pas
             if (reason == dbgEventReason.dbgEventReasonLaunchProgram || reason == dbgEventReason.dbgEventReasonAttachProgram)
-                ClaudeVSPackage.Instance?.EnsureChatVisible();
+                _ensureChatVisible?.Invoke();
         }
 
         private void OnEnterBreakMode(dbgEventReason reason, ref dbgExecutionAction action)
@@ -49,7 +58,7 @@ namespace ClaudeVS
                 return;
             // Le panneau n'est réaffiché que pour une exception (il en montre le détail) : un point d'arrêt ou
             // un pas ne doit pas rouvrir un panneau que l'utilisateur a fermé
-            ClaudeVSPackage.Instance?.EnsureChatVisible();
+            _ensureChatVisible?.Invoke();
             // Un outil (debugStart, debugContinue…) est en train d'attendre cet arrêt : il le rapportera lui-même
             if (_tools.IsWaiting) return;
             try
@@ -59,7 +68,7 @@ namespace ClaudeVS
             }
             catch (Exception ex)
             {
-                ClaudeVSPackage.Instance?.Log.Error("Événement débogueur : " + ex.Message);
+                _log?.Error("Événement débogueur : " + ex.Message);
             }
         }
     }

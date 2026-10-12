@@ -18,24 +18,22 @@ namespace ClaudeVS
     /// Tous les appels DTE se font sur le thread principal ; les attentes se font par sondage
     /// pour ne pas bloquer l'interface.
     /// </summary>
-    internal sealed class DebugTools
+    internal sealed class DebugTools : ToolGroup
     {
-        public static readonly HashSet<string> Names = new HashSet<string>
-        {
-            "build", "debugStart", "debugStop", "debugContinue", "debugStep", "debugBreak",
-            "debugState", "debugLocals", "debugEvaluate", "breakpointAdd", "breakpointRemove", "breakpointList", "getOutput",
-            "runTests", "debugWait",
-        };
-
         // Volets de la fenêtre Sortie (les noms sont localisés, les GUID non)
         private static readonly Guid DebugPane = new Guid("FC076020-078A-11D1-A7DF-00A0C9110051");
         private static readonly Guid BuildPane = new Guid("1BD8A850-02E1-11D1-BEE7-00A0C913D1F8");
 
         private readonly AsyncPackage _package;
+        private readonly Log _log;
         private DTE2 _dte;
         private int _waiting; // nombre d'outils en attente d'un arrêt du programme (l'instance est partagée avec DebugMonitor)
 
-        public DebugTools(AsyncPackage package) => _package = package;
+        public DebugTools(AsyncPackage package, Log log)
+        {
+            _package = package;
+            _log = log;
+        }
 
         /// <summary>Un outil attend que le programme s'arrête : les événements du débogueur n'ont pas à être relayés.</summary>
         public bool IsWaiting => _waiting > 0;
@@ -47,7 +45,7 @@ namespace ClaudeVS
             return State();
         }
 
-        public static JArray Definitions() => new JArray
+        public override JArray Definitions() => new JArray
         {
             IdeTools.Tool("build", "Build the solution (or one project) in Visual Studio and return the result with compiler errors and warnings.", new JObject
             {
@@ -99,7 +97,6 @@ namespace ClaudeVS
                 ["pane"] = new JObject { ["type"] = "string", ["enum"] = new JArray("debug", "build"), ["description"] = "Which pane (default debug)." },
                 ["tail"] = IdeTools.Int("Number of last lines to return (default 100)."),
             }),
-            TestTools.Definition(),
         };
 
         // DTE est un singleton stable du processus : résolu une fois, pas à chaque tour de sondage
@@ -112,7 +109,7 @@ namespace ClaudeVS
             }
         }
 
-        public async Task<JObject> CallAsync(string name, JObject args)
+        public override async Task<JObject> CallAsync(string name, JObject args, System.Threading.CancellationToken ct)
         {
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
             if (Dte.Solution == null || !Dte.Solution.IsOpen)
@@ -146,31 +143,8 @@ namespace ClaudeVS
                 case "breakpointRemove": return BreakpointRemove((string)args["file"], (int?)args["line"] ?? 0);
                 case "breakpointList": return IdeTools.Json(Breakpoints());
                 case "getOutput": return GetOutput((string)args["pane"] ?? "debug", (int?)args["tail"] ?? 100);
-                case "runTests": return await RunTestsAsync(args);
                 default: throw new InvalidOperationException("Unknown tool: " + name);
             }
-        }
-
-        // ---- Tests ----------------------------------------------------------------------------
-
-        private async Task<JObject> RunTestsAsync(JObject args)
-        {
-            await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
-            var target = (string)args["project"];
-            if (string.IsNullOrEmpty(target))
-            {
-                // Un projet « .csproj » ouvert seul : Solution.FullName est vide, on se rabat sur le projet
-                var solutionPath = Dte.Solution.FullName;
-                target = !string.IsNullOrEmpty(solutionPath) ? solutionPath
-                    : Dte.Solution.Projects.Cast<Project>().FirstOrDefault(p => !string.IsNullOrEmpty(p.FullName))?.FullName;
-            }
-            else target = PathResolver.Resolve(target, mustExist: false); // peut être un dossier
-            var log = ClaudeVSPackage.Instance.Log;
-
-            await TaskScheduler.Default; // le processus tourne hors du thread principal
-            var result = await TestTools.RunAsync(target, (string)args["filter"], (bool?)args["noBuild"] ?? false,
-                (int?)args["timeoutSeconds"] ?? 600, log);
-            return IdeTools.Json(result);
         }
 
         // ---- Compilation -------------------------------------------------------------------
@@ -297,7 +271,7 @@ namespace ClaudeVS
             ThreadHelper.ThrowIfNotOnUIThread();
             if (previous == null) return;
             try { Dte.Solution.SolutionBuild.StartupProjects = previous; }
-            catch (Exception ex) { ClaudeVSPackage.Instance?.Log.Error("Restauration du projet de démarrage : " + ex.Message); }
+            catch (Exception ex) { _log?.Error("Restauration du projet de démarrage : " + ex.Message); }
         }
 
         /// <summary>

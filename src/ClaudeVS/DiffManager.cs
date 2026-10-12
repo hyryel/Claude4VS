@@ -26,13 +26,21 @@ namespace ClaudeVS
         private readonly AsyncPackage _package;
         private readonly Dictionary<string, PendingDiff> _pending = new Dictionary<string, PendingDiff>();
 
+        private Log _log;
+
         private DiffManager(AsyncPackage package)
         {
             _package = package;
             _ = Task.Run(PurgeStaleTemp);
         }
 
-        public static DiffManager GetInstance(AsyncPackage package) => _instance ?? (_instance = new DiffManager(package));
+        /// <param name="log">Journal : renseigné par le premier appelant qui en fournit un (IdeTools à l'initialisation).</param>
+        public static DiffManager GetInstance(AsyncPackage package, Log log = null)
+        {
+            var instance = _instance ?? (_instance = new DiffManager(package));
+            if (log != null && instance._log == null) instance._log = log;
+            return instance;
+        }
 
         /// <summary>Dossiers de diff laissés par des sessions précédentes (fichier verrouillé, VS tué) : purge au démarrage, au mieux.</summary>
         private static void PurgeStaleTemp()
@@ -109,7 +117,7 @@ namespace ClaudeVS
             pending.CloseFrame();
             TryDelete(dir);
 
-            ClaudeVSPackage.Instance?.Log.Info(accepted == true ? $"Diff accepté : {fileName}" : accepted == false ? $"Diff refusé : {fileName}" : $"Diff fermé : {fileName}");
+            _log?.Info(accepted == true ? $"Diff accepté : {fileName}" : accepted == false ? $"Diff refusé : {fileName}" : $"Diff fermé : {fileName}");
             return (accepted, finalText);
         }
 

@@ -8,10 +8,52 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using EnvDTE80;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
+using Microsoft.VisualStudio.Threading;
 using Newtonsoft.Json.Linq;
 
 namespace ClaudeVS
 {
+    /// <summary>Groupe MCP de l'outil runTests (définition, résolution de la cible, appel).</summary>
+    internal sealed class TestToolGroup : ToolGroup
+    {
+        private readonly AsyncPackage _package;
+        private readonly Log _log;
+
+        public TestToolGroup(AsyncPackage package, Log log)
+        {
+            _package = package;
+            _log = log;
+        }
+
+        public override JArray Definitions() => new JArray { TestTools.Definition() };
+
+        public override async Task<JObject> CallAsync(string name, JObject args, CancellationToken ct)
+        {
+            if (name != "runTests") throw new InvalidOperationException("Unknown tool: " + name);
+            await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+            var dte = (DTE2)Package.GetGlobalService(typeof(SDTE));
+            if (dte.Solution == null || !dte.Solution.IsOpen)
+                throw new InvalidOperationException("No solution is open in Visual Studio.");
+            var target = (string)args["project"];
+            if (string.IsNullOrEmpty(target))
+            {
+                // Un projet « .csproj » ouvert seul : Solution.FullName est vide, on se rabat sur le projet
+                var solutionPath = dte.Solution.FullName;
+                target = !string.IsNullOrEmpty(solutionPath) ? solutionPath
+                    : dte.Solution.Projects.Cast<EnvDTE.Project>().FirstOrDefault(p => !string.IsNullOrEmpty(p.FullName))?.FullName;
+            }
+            else target = PathResolver.Resolve(target, mustExist: false); // peut être un dossier
+
+            await TaskScheduler.Default; // le processus tourne hors du thread principal
+            var result = await TestTools.RunAsync(target, (string)args["filter"], (bool?)args["noBuild"] ?? false,
+                (int?)args["timeoutSeconds"] ?? 600, _log);
+            return IdeTools.Json(result);
+        }
+    }
+
     /// <summary>
     /// Exécution des tests via « dotnet test » avec un rapport TRX, lu ensuite pour le modèle.
     /// Indépendant de l'Explorateur de tests (dont l'API n'est pas publique) : vaut pour xUnit, NUnit et MSTest.

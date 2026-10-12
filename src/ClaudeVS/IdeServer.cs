@@ -295,11 +295,6 @@ namespace ClaudeVS
         private static bool IsToolsClient(IWebSocketConnection socket) =>
             socket.ConnectionInfo.Path?.TrimEnd('/').EndsWith("/tools", StringComparison.OrdinalIgnoreCase) == true;
 
-        private static readonly HashSet<string> ModelTools = new HashSet<string>(DebugTools.Names.Concat(EditorTools.Names).Concat(RoslynTools.Names))
-        {
-            "getDiagnostics", "getOpenEditors", "getWorkspaceFolders", "getCurrentSelection", "openFile", "checkDocumentDirty", "saveDocument",
-        };
-
         private async Task<JToken> DispatchAsync(string method, JObject p, bool toolsOnly, CancellationToken ct)
         {
             switch (method)
@@ -315,13 +310,11 @@ namespace ClaudeVS
                 case "ping":
                     return new JObject();
                 case "tools/list":
-                    var tools = IdeTools.ToolDefinitions();
-                    if (toolsOnly) tools = new JArray(tools.Where(t => ModelTools.Contains((string)t["name"])));
-                    return new JObject { ["tools"] = tools };
+                    return new JObject { ["tools"] = _tools.ToolDefinitions(toolsOnly) };
                 case "tools/call":
                     var name = (string)p["name"];
                     _log.Info($"← tools/call {name}{(toolsOnly ? " (panneau)" : "")}");
-                    if (toolsOnly && !ModelTools.Contains(name)) throw new InvalidOperationException("Unknown tool: " + name);
+                    if (toolsOnly && !_tools.IsModelVisible(name)) throw new InvalidOperationException("Unknown tool: " + name);
                     return await _tools.CallAsync(name, p["arguments"] as JObject ?? new JObject(), ct);
                 case "resources/list":
                     return new JObject { ["resources"] = new JArray() };
