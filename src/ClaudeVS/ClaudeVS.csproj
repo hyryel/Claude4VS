@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>ClaudeVS</RootNamespace>
+    <AssemblyName>ClaudeVS</AssemblyName>
+    <VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
+    <GeneratePkgDefFile>true</GeneratePkgDefFile>
+    <UseCodebase>true</UseCodebase>
+    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
+    <IncludeDebugSymbolsInVSIXContainer>true</IncludeDebugSymbolsInVSIXContainer>
+    <IncludeDebugSymbolsInLocalVSIXDeployment>true</IncludeDebugSymbolsInLocalVSIXDeployment>
+    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
+    <CopyOutputSymbolsToOutputDirectory>true</CopyOutputSymbolsToOutputDirectory>
+    <!-- Déploie dans l'instance expérimentale (devenv /rootsuffix Exp) du VS dont provient MSBuild, à chaque build -->
+    <DeployExtension>true</DeployExtension>
+    <StartAction>Program</StartAction>
+    <StartProgram>$(DevEnvDir)devenv.exe</StartProgram>
+    <StartArguments>/rootsuffix Exp</StartArguments>
+    <Title>Claude fo VS</Title>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <!--
+    Compatibilité VS 2022 (17.14+) et VS 2026 : on compile contre les versions embarquées par VS 2022,
+    les plus anciennes ; devenv.exe.config de chaque VS redirige vers sa propre version à l'exécution.
+    Aucune de ces DLL n'est copiée dans le VSIX (ExcludeAssets / IncludeAssets=compile).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.9.820" PrivateAssets="all" />
+    <PackageReference Include="Fleck" Version="1.2.0" />
+    <!-- WebView2 : 1.0.2903.40 = version de VS 2022 17.14 ; VS 2026 redirige vers 1.0.3967.48 -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" IncludeAssets="compile" />
+    <!-- Roslyn : 4.14 = version de VS 2022 17.14 ; VS 2026 redirige vers 5.10 -->
+    <PackageReference Include="Microsoft.VisualStudio.LanguageServices" Version="4.14.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" ExcludeAssets="runtime" />
+    <Reference Include="System.ComponentModel.Composition" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Design" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="source.extension.vsixmanifest" SubType="Designer" />
+    <Content Include="Chat/web/**/*" IncludeInVSIX="true" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="THIRD-PARTY-NOTICES.txt" IncludeInVSIX="true" CopyToOutputDirectory="PreserveNewest" />
+    <VSCTCompile Include="ClaudeVSPackage.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
+  </ItemGroup>
+
+</Project>

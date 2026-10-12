@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidClaudeVSPackage">
+    <Groups>
+      <Group guid="guidClaudeVSCmdSet" id="ToolsGroup" priority="0x0100">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS" />
+      </Group>
+      <Group guid="guidClaudeVSCmdSet" id="EditorContextGroup" priority="0x0100">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN" />
+      </Group>
+      <!-- Affichage › Autres fenêtres : l'endroit habituel des fenêtres d'outils -->
+      <Group guid="guidClaudeVSCmdSet" id="OtherWindowsGroup" priority="0x0100">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CSCD_WINDOWS" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidClaudeVSCmdSet" id="cmdOpenChat" priority="0x0090" type="Button">
+        <Parent guid="guidClaudeVSCmdSet" id="ToolsGroup" />
+        <Strings>
+          <ButtonText>Claude</ButtonText>
+          <CanonicalName>.Claude.OpenChat</CanonicalName>
+          <LocalizedName>.Claude.OpenChat</LocalizedName>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeVSCmdSet" id="cmdLaunchClaude" priority="0x0100" type="Button">
+        <Parent guid="guidClaudeVSCmdSet" id="ToolsGroup" />
+        <Strings>
+          <ButtonText>Lancer Claude Code (terminal)</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidClaudeVSCmdSet" id="cmdMention" priority="0x0100" type="Button">
+        <Parent guid="guidClaudeVSCmdSet" id="EditorContextGroup" />
+        <Strings>
+          <ButtonText>Envoyer la sélection à Claude</ButtonText>
+          <CanonicalName>.Claude.SendSelection</CanonicalName>
+          <LocalizedName>.Claude.SendSelection</LocalizedName>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <CommandPlacements>
+    <CommandPlacement guid="guidClaudeVSCmdSet" id="cmdOpenChat" priority="0x0100">
+      <Parent guid="guidClaudeVSCmdSet" id="OtherWindowsGroup" />
+    </CommandPlacement>
+  </CommandPlacements>
+
+  <KeyBindings>
+    <!-- Modifiables dans Outils › Options › Clavier (commandes Claude.OpenChat et Claude.SendSelection) -->
+    <KeyBinding guid="guidClaudeVSCmdSet" id="cmdOpenChat" editor="guidVSStd97" key1="C" mod1="Control Alt Shift" />
+    <KeyBinding guid="guidClaudeVSCmdSet" id="cmdMention" editor="guidVSStd97" key1="M" mod1="Control Alt" />
+  </KeyBindings>
+
+  <Symbols>
+    <GuidSymbol name="guidClaudeVSPackage" value="{3f6a0c8e-2d4b-4f1a-9c7e-5b8d1a2e4f60}" />
+    <GuidSymbol name="guidClaudeVSCmdSet" value="{b2d4e6f8-1a3c-4e5f-8a9b-0c1d2e3f4a5b}">
+      <IDSymbol name="ToolsGroup" value="0x1020" />
+      <IDSymbol name="EditorContextGroup" value="0x1021" />
+      <IDSymbol name="OtherWindowsGroup" value="0x1022" />
+      <IDSymbol name="cmdLaunchClaude" value="0x0100" />
+      <IDSymbol name="cmdMention" value="0x0101" />
+      <IDSymbol name="cmdOpenChat" value="0x0102" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>
