@@ -151,11 +151,13 @@ const cliHandlers = {
   },
   result: m => {
     state.currentAssistant = null;
-    // Erreur et interruption sont affichées indépendamment : une interruption ne doit pas masquer une vraie erreur.
-    // Le « result » d'un tour interrompu est lui-même en erreur (« Request interrupted… ») : celui-là n'est pas une erreur.
+    // Le « result » d'un tour que l'utilisateur a interrompu est toujours marqué en erreur, avec un texte interne au CLI
+    // (« Request interrupted… », « [ede_diagnostic] result_type=user … ») : ce n'est pas une erreur pour l'utilisateur.
+    // On n'affiche que le séparateur « interrompu » ; le texte brut part dans la console pour le diagnostic.
+    const isError = m.is_error || (m.subtype && m.subtype !== 'success');
     const errText = m.result || m.errors?.join('\n') || ('Erreur : ' + m.subtype);
-    const isInterruptResult = state.interrupted && /interrupt/i.test(errText + ' ' + (m.subtype || ''));
-    if ((m.is_error || (m.subtype && m.subtype !== 'success')) && !isInterruptResult) append(el('div', 'error', errText));
+    if (isError && state.interrupted) console.info('Résultat du tour interrompu :', errText);
+    else if (isError) append(el('div', 'error', errText));
     if (state.interrupted) interruptedDivider();
     state.interrupted = false;
     const parts = [];
