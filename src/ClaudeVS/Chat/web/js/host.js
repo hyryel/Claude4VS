@@ -31,7 +31,7 @@ function onBanner(m) {
   bannerEl.classList.remove('auto');
   bannerTextEl.textContent = m.text || '';
   bannerEl.hidden = !m.text;
-  if (m.text && !state.busy) {
+  if (m.text && !m.sticky && !state.busy) { // sticky : l'annonce demande une action, pas de fermeture automatique
     void bannerEl.offsetWidth; // relance l'animation si un bandeau à décompte en remplace un autre
     bannerEl.classList.add('auto');
   }

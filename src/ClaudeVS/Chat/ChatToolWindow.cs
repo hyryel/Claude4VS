@@ -164,7 +164,13 @@ namespace ClaudeVS.Chat
             ThreadHelper.ThrowIfNotOnUIThread();
             _package.Log.Error($"WebView2 : échec du processus {e.ProcessFailedKind} ({e.Reason}) {e.ProcessDescription}");
             if (_disposed) return;
-            const string notice = "Le panneau a été rechargé après un plantage de WebView2 ; l'historique de la conversation est disponible via Reprendre.";
+            // Bandeau orange (comme le changement de solution), livré après le prochain « ready » de la page rechargée
+            var banner = new JObject
+            {
+                ["type"] = FromHost.Banner,
+                ["text"] = "Le panneau a été rechargé après un plantage de WebView2.\n"
+                         + "La conversation se poursuit ; son affichage est disponible via le bouton Conversations précédentes (🕘).",
+            };
             try
             {
                 switch (e.ProcessFailedKind)
@@ -175,12 +181,12 @@ namespace ClaudeVS.Chat
                         _web = new WebView2();
                         Content = _web;
                         _initialized = false;
-                        Post(new JObject { ["type"] = FromHost.Notice, ["text"] = notice }); // livré après le prochain « ready »
+                        Post(banner);
                         RunOnUi(InitAsync, "webview");
                         break;
                     case CoreWebView2ProcessFailedKind.RenderProcessExited:
                         _uiReady = false;
-                        Post(new JObject { ["type"] = FromHost.Notice, ["text"] = notice });
+                        Post(banner);
                         _web.CoreWebView2?.Reload();
                         break;
                     case CoreWebView2ProcessFailedKind.RenderProcessUnresponsive:

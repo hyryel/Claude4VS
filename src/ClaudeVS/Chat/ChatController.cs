@@ -215,7 +215,7 @@ namespace ClaudeVS.Chat
                         }));
                     else if (_claude?.IsRunning == true)
                         // Le CLI n'a pas de requête pour revenir à l'effort par défaut : il garde le réglage précédent
-                        PostNotice("Effort par défaut : s'appliquera à la prochaine conversation (la session en cours garde l'effort actuel).");
+                        PostBanner("Effort par défaut : il s'appliquera à la prochaine conversation.\nLa conversation en cours garde l'effort actuel.");
                     PostSettings();
                     break;
                 }
@@ -398,8 +398,8 @@ namespace ClaudeVS.Chat
             {
                 await Task.Delay(StartupTimeout);
                 if (claude != _claude || _cliReady || !claude.IsRunning) return;
-                PostNotice($"claude ne répond pas depuis {StartupTimeout.TotalSeconds:0} s (initialisation en attente). "
-                         + "Vérifiez le volet Sortie « Claude » ; « Nouvelle conversation » relance le processus.");
+                PostBanner($"Claude ne répond pas depuis {StartupTimeout.TotalSeconds:0} s (démarrage en attente).\n"
+                         + "Vérifiez le volet Sortie « Claude » ; le bouton Nouvelle conversation (+) relance le processus.", sticky: true);
             }, "startup");
         }
 
@@ -428,7 +428,8 @@ namespace ClaudeVS.Chat
                 if (_claude != null)
                 {
                     // Un message envoyé pendant le chargement a déjà lancé un processus, sans --resume
-                    PostNotice("Un message a été envoyé pendant le chargement : la conversation affichée n'a pas été reprise par le CLI. Rouvrez-la depuis l'historique pour la poursuivre.");
+                    PostBanner("Un message a été envoyé pendant le chargement : la conversation affichée n'a pas été reprise par Claude.\n"
+                             + "Rouvrez-la avec le bouton Conversations précédentes (🕘) pour la poursuivre.", sticky: true);
                     return;
                 }
                 if (!EnsureStarted(resumeSessionId)) PostStatus("idle");
@@ -652,7 +653,8 @@ namespace ClaudeVS.Chat
         private void PostError(string text) => _post(new JObject { ["type"] = FromHost.Error, ["text"] = text });
         private void PostNotice(string text) => _post(new JObject { ["type"] = FromHost.Notice, ["text"] = text });
         /// <summary>Annonce importante, hors du fil : bandeau orange sous la barre d'outils, jusqu'à ce que l'utilisateur le ferme.</summary>
-        private void PostBanner(string text) => _post(new JObject { ["type"] = FromHost.Banner, ["text"] = text });
+        /// <param name="sticky">Vrai : pas de fermeture automatique (l'annonce demande une action de l'utilisateur).</param>
+        private void PostBanner(string text, bool sticky = false) => _post(new JObject { ["type"] = FromHost.Banner, ["text"] = text, ["sticky"] = sticky });
 
         private void PostSettings() => _post(new JObject
         {
