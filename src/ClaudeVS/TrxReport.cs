@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Xml.Linq;
 using Newtonsoft.Json.Linq;
+#nullable enable
 
 namespace ClaudeVS
 {
@@ -36,16 +37,16 @@ namespace ClaudeVS
                 }
                 foreach (var r in doc.Descendants(Ns + "UnitTestResult"))
                 {
-                    var outcome = (string)r.Attribute("outcome");
+                    var outcome = (string?)r.Attribute("outcome");
                     if (outcome == "Passed" || outcome == "NotExecuted") continue;
                     var error = r.Descendants(Ns + "ErrorInfo").FirstOrDefault();
-                    var stack = (string)error?.Element(Ns + "StackTrace");
+                    var stack = (string?)error?.Element(Ns + "StackTrace");
                     failures.Add(new JObject
                     {
-                        ["test"] = (string)r.Attribute("testName"),
+                        ["test"] = (string?)r.Attribute("testName"),
                         ["outcome"] = outcome,
-                        ["duration"] = (string)r.Attribute("duration"),
-                        ["message"] = Truncate((string)error?.Element(Ns + "Message"), 2000),
+                        ["duration"] = (string?)r.Attribute("duration"),
+                        ["message"] = Truncate((string?)error?.Element(Ns + "Message"), 2000),
                         ["stackTrace"] = Truncate(stack, 1500),
                     });
                 }
@@ -53,7 +54,7 @@ namespace ClaudeVS
             return summary;
         }
 
-        private static long Attr(XElement e, string name) => long.TryParse((string)e.Attribute(name), out var v) ? v : 0;
-        private static string Truncate(string s, int n) => s != null && s.Length > n ? s.Substring(0, n) + "…" : s;
+        private static long Attr(XElement e, string name) => long.TryParse((string?)e.Attribute(name), out var v) ? v : 0;
+        private static string? Truncate(string? s, int n) => s != null && s.Length > n ? s.Substring(0, n) + "…" : s;
     }
 }

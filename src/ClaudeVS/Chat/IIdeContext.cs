@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Newtonsoft.Json.Linq;
+#nullable enable
 
 namespace ClaudeVS.Chat
 {
@@ -18,13 +19,13 @@ namespace ClaudeVS.Chat
         void OpenFile(string path, int? line);
 
         /// <summary>Mettre en forme le document ; null si les outils de l'IDE ne sont pas prêts. Thread UI.</summary>
-        JObject FormatDocument(string path);
+        JObject? FormatDocument(string path);
 
         /// <summary>
         /// Diff natif de la proposition : accepted = true (Accepter), false (Refuser), null (onglet fermé ou abandonné) ;
         /// text = contenu final, éventuellement retouché. Se termine sur le thread UI.
         /// </summary>
-        Task<(bool? accepted, string text)> ShowDiffAsync(string path, string proposed, string tab);
+        Task<(bool? accepted, string? text)> ShowDiffAsync(string path, string proposed, string tab);
 
         void CloseDiff(string tab);
     }
@@ -55,9 +56,9 @@ namespace ClaudeVS.Chat
             if (line.HasValue && view != null) view.SetCaretPos(Math.Max(0, line.Value - 1), 0);
         }
 
-        public JObject FormatDocument(string path) => _package.Tools?.Editor.FormatDocument(path, closeIfNotOpen: true);
+        public JObject? FormatDocument(string path) => _package.Tools?.Editor.FormatDocument(path, closeIfNotOpen: true);
 
-        public async Task<(bool? accepted, string text)> ShowDiffAsync(string path, string proposed, string tab)
+        public async Task<(bool? accepted, string? text)> ShowDiffAsync(string path, string proposed, string tab)
         {
             var result = await DiffManager.GetInstance(_package).ShowProposalAsync(path, path, proposed, tab);
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync();

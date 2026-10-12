@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
+#nullable enable
 
 namespace ClaudeVS.Chat
 {
@@ -20,11 +21,11 @@ namespace ClaudeVS.Chat
     /// <summary>Réglages d'un lancement du CLI.</summary>
     internal sealed class ClaudeOptions
     {
-        public string PermissionMode { get; set; }
-        public string Model { get; set; }             // null = modèle par défaut du CLI
-        public string Effort { get; set; }            // null = effort par défaut du modèle
-        public string ResumeSessionId { get; set; }   // null = nouvelle conversation
-        public string McpConfigPath { get; set; }     // null = pas de serveur MCP de l'IDE
+        public string PermissionMode { get; set; } = "default"; // toujours renseigné par l'appelant
+        public string? Model { get; set; }             // null = modèle par défaut du CLI
+        public string? Effort { get; set; }            // null = effort par défaut du modèle
+        public string? ResumeSessionId { get; set; }   // null = nouvelle conversation
+        public string? McpConfigPath { get; set; }     // null = pas de serveur MCP de l'IDE
     }
 
     /// <summary>Ligne de commande du CLI et configuration du serveur MCP de l'IDE. Sans dépendance à Visual Studio.</summary>

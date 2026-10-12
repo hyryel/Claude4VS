@@ -1,3 +1,4 @@
+#nullable enable
 namespace ClaudeVS.Chat
 {
     // Types des messages échangés entre l'extension et l'interface web du panneau.

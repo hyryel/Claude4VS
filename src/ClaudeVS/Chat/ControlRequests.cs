@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.Shell;
 using Newtonsoft.Json.Linq;
+#nullable enable
 
 namespace ClaudeVS.Chat
 {
@@ -59,7 +60,7 @@ namespace ClaudeVS.Chat
                 foreach (var c in categories)
                 {
                     var tokens = (long?)c["tokens"] ?? 0;
-                    var kind = (string)c["kind"];
+                    var kind = (string?)c["kind"];
                     total += tokens;
                     if (kind == "used" || kind == "deferred") used += tokens;
                     if (kind != "free") details.Add(new JObject { ["name"] = c["name"], ["tokens"] = tokens });
@@ -77,12 +78,12 @@ namespace ClaudeVS.Chat
             var sent = Send(request, r =>
             {
                 var resp = r["response"] as JObject ?? new JObject();
-                var error = (string)r["error"] ?? (string)resp["error"];
+                var error = (string?)r["error"] ?? (string?)resp["error"];
                 _post(new JObject
                 {
                     ["type"] = dryRun ? FromHost.RewindPreview : FromHost.RewindDone,
                     ["uuid"] = uuid,
-                    ["ok"] = (string)r["subtype"] == "success" && error == null,
+                    ["ok"] = (string?)r["subtype"] == "success" && error == null,
                     ["error"] = error,
                     ["canRewind"] = resp["canRewind"],
                     ["files"] = resp["filesChanged"] ?? new JArray(),

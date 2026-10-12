@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
+#nullable enable
 
 namespace ClaudeVS
 {
@@ -23,12 +24,12 @@ namespace ClaudeVS
     /// <summary>Base des groupes : les noms gérés sont dérivés des définitions (une seule déclaration par outil).</summary>
     internal abstract class ToolGroup : IToolGroup
     {
-        private HashSet<string> _names;
+        private HashSet<string?>? _names;
 
         public abstract JArray Definitions();
 
         public bool Handles(string name) =>
-            (_names ?? (_names = new HashSet<string>(Definitions().Select(t => (string)t["name"])))).Contains(name);
+            (_names ?? (_names = new HashSet<string?>(Definitions().Select(t => (string?)t["name"])))).Contains(name);
 
         public virtual bool ModelVisible(string name) => true;
 

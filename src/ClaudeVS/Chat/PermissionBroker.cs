@@ -5,6 +5,7 @@ using System.Linq;
 using Microsoft.VisualStudio.Shell;
 using Newtonsoft.Json.Linq;
 using Task = System.Threading.Tasks.Task;
+#nullable enable
 
 namespace ClaudeVS.Chat
 {
@@ -46,7 +47,7 @@ namespace ClaudeVS.Chat
 
             _ide.Log.Info($"→ permission {requestId} : {response["behavior"]}");
             response["toolUseID"] = request["tool_use_id"];
-            if ((string)response["behavior"] == "allow" && response["updatedInput"] == null)
+            if ((string?)response["behavior"] == "allow" && response["updatedInput"] == null)
                 response["updatedInput"] = request["input"];
             // En cas d'échec d'envoi, la demande est encore en attente : HandleWriteFailure la marque « cancelled » avec les autres
             if (!_sendResponse(requestId, response)) return;
@@ -79,9 +80,9 @@ namespace ClaudeVS.Chat
         public void ShowEditDiff(string requestId, JObject request)
         {
             var input = request["input"] as JObject;
-            var tool = (string)request["tool_name"];
-            var path = (string)input?["file_path"];
-            if (string.IsNullOrEmpty(path)) return;
+            var tool = (string?)request["tool_name"];
+            var path = (string?)input?["file_path"];
+            if (input == null || path == null || path.Length == 0) return; // sans input, path est null aussi
 
             _runOnUi(async () =>
             {

@@ -1,5 +1,6 @@
 using System;
 using Newtonsoft.Json.Linq;
+#nullable enable
 
 namespace ClaudeVS.Chat
 {
@@ -9,27 +10,27 @@ namespace ClaudeVS.Chat
     /// </summary>
     internal static class EditPreview
     {
-        public static string Apply(string tool, JObject input, string original)
+        public static string Apply(string? tool, JObject input, string original)
         {
             switch (tool)
             {
                 case "Write":
-                    return (string)input["content"] ?? "";
+                    return (string?)input["content"] ?? "";
                 case "Edit":
-                    return Replace(original, (string)input["old_string"], (string)input["new_string"], (bool?)input["replace_all"] ?? false);
+                    return Replace(original, (string?)input["old_string"], (string?)input["new_string"], (bool?)input["replace_all"] ?? false);
                 case "MultiEdit":
                     var text = original;
-                    foreach (var e in (JArray)input["edits"] ?? new JArray())
-                        text = Replace(text, (string)e["old_string"], (string)e["new_string"], (bool?)e["replace_all"] ?? false);
+                    foreach (var e in (JArray?)input["edits"] ?? new JArray())
+                        text = Replace(text, (string?)e["old_string"], (string?)e["new_string"], (bool?)e["replace_all"] ?? false);
                     return text;
                 default:
                     throw new NotSupportedException(tool);
             }
         }
 
-        public static string Replace(string text, string oldString, string newString, bool all)
+        public static string Replace(string text, string? oldString, string? newString, bool all)
         {
-            if (string.IsNullOrEmpty(oldString)) return newString ?? "";
+            if (oldString == null || oldString.Length == 0) return newString ?? "";
             newString = newString ?? "";
             var idx = text.IndexOf(oldString, StringComparison.Ordinal);
             if (idx < 0 && text.Contains("\r\n"))
@@ -44,7 +45,7 @@ namespace ClaudeVS.Chat
         }
 
         /// <summary>Entrée acceptée dans le diff : celle du modèle, ou le texte retouché par l'utilisateur (<paramref name="edited"/>).</summary>
-        public static JObject BuildUpdatedInput(string tool, JObject input, string path, string original, string proposed, string edited)
+        public static JObject BuildUpdatedInput(string? tool, JObject input, string path, string original, string proposed, string? edited)
         {
             var updated = (JObject)input.DeepClone();
             if (edited != null && edited != proposed)

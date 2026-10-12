@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
+#nullable enable
 
 namespace ClaudeVS.Chat
 {
@@ -39,16 +40,16 @@ namespace ClaudeVS.Chat
             return result;
         }
 
-        private static string FirstPrompt(string file, Log log)
+        private static string? FirstPrompt(string file, Log? log)
         {
             try
             {
                 foreach (var line in ReadLines(file).Take(200))
                 {
                     var o = TryParse(line);
-                    if ((string)o?["type"] != "user" || (bool?)o["isMeta"] == true || (bool?)o["isSidechain"] == true) continue;
+                    if ((string?)o?["type"] != "user" || (bool?)o["isMeta"] == true || (bool?)o["isSidechain"] == true) continue;
                     var text = UserText(o["message"]?["content"]);
-                    if (string.IsNullOrWhiteSpace(text)) continue;
+                    if (text == null || string.IsNullOrWhiteSpace(text)) continue;
                     text = text.Trim().Replace("\r", " ").Replace("\n", " ");
                     return text.Length > 90 ? text.Substring(0, 90) + "…" : text;
                 }
@@ -58,15 +59,15 @@ namespace ClaudeVS.Chat
         }
 
         /// <summary>Texte saisi par l'utilisateur, sans les blocs de contexte IDE ni les résultats d'outils.</summary>
-        private static string UserText(JToken content)
+        private static string? UserText(JToken? content)
         {
-            if (content is JValue v) return Clean((string)v);
+            if (content is JValue v) return Clean((string?)v);
             if (content is JArray arr)
-                return string.Join("\n", arr.Where(b => (string)b["type"] == "text").Select(b => Clean((string)b["text"])).Where(t => !string.IsNullOrWhiteSpace(t)));
+                return string.Join("\n", arr.Where(b => (string?)b["type"] == "text").Select(b => Clean((string?)b["text"])).Where(t => !string.IsNullOrWhiteSpace(t)));
             return null;
         }
 
-        private static string Clean(string t)
+        private static string? Clean(string? t)
         {
             if (t == null) return null;
             if (t.StartsWith("<ide_") || t.StartsWith("<command-") || t.StartsWith("<local-command") || t.StartsWith("<system-reminder")) return null;
@@ -84,8 +85,8 @@ namespace ClaudeVS.Chat
                 foreach (var line in ReadLines(file))
                 {
                     var o = TryParse(line);
-                    var type = (string)o?["type"];
-                    if ((type != "user" && type != "assistant") || (bool?)o["isSidechain"] == true || (bool?)o["isMeta"] == true) continue;
+                    var type = (string?)o?["type"];
+                    if (o == null || (type != "user" && type != "assistant") || (bool?)o["isSidechain"] == true || (bool?)o["isMeta"] == true) continue;
                     if (type == "user") TruncateToolResults(o["message"]?["content"] as JArray);
                     result.Add(new JObject { ["type"] = type, ["uuid"] = o["uuid"], ["message"] = o["message"] });
                 }
@@ -94,21 +95,21 @@ namespace ClaudeVS.Chat
             return result;
         }
 
-        private static void TruncateToolResults(JArray content)
+        private static void TruncateToolResults(JArray? content)
         {
             if (content == null) return;
             foreach (var block in content.OfType<JObject>())
             {
-                if ((string)block["type"] != "tool_result") continue;
+                if ((string?)block["type"] != "tool_result") continue;
                 if (block["content"] is JValue v && v.Type == JTokenType.String)
-                    block["content"] = Truncate((string)v);
+                    block["content"] = Truncate((string?)v);
                 else if (block["content"] is JArray parts)
                     foreach (var p in parts.OfType<JObject>())
-                        if ((string)p["type"] == "text" && p["text"] is JValue t && t.Type == JTokenType.String) p["text"] = Truncate((string)t);
+                        if ((string?)p["type"] == "text" && p["text"] is JValue t && t.Type == JTokenType.String) p["text"] = Truncate((string?)t);
             }
         }
 
-        private static string Truncate(string text) =>
+        private static string? Truncate(string? text) =>
             text != null && text.Length > MaxToolResultChars ? text.Substring(0, MaxToolResultChars) + "\n… [tronqué]" : text;
 
         private static IEnumerable<string> ReadLines(string file)
@@ -117,12 +118,12 @@ namespace ClaudeVS.Chat
             using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             using (var sr = new StreamReader(fs))
             {
-                string line;
+                string? line;
                 while ((line = sr.ReadLine()) != null) yield return line;
             }
         }
 
-        private static JObject TryParse(string line)
+        private static JObject? TryParse(string line)
         {
             try { return JObject.Parse(line); } catch { return null; }
         }
