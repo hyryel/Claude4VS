@@ -11,6 +11,17 @@ Extension Visual Studio (2022 à partir de 17.14, et 2026) qui intègre Claude C
 - Claude Code installé : `irm https://claude.ai/install.ps1 | iex` ou `npm install -g @anthropic-ai/claude-code`. Redémarrer VS ensuite, le `PATH` n'est lu qu'au démarrage.
 - Le CLI est cherché dans cet ordre : `CLAUDEVS_CLAUDE_PATH`, le `PATH`, `~/.local/bin`, `~/claude`, le dossier npm global, puis le binaire de l'extension VS Code. **Sortie › Claude** indique celui retenu.
 
+### Première utilisation (obligatoire)
+
+Le panneau ne suffit pas à la première installation : il faut d'abord finir la configuration de Claude Code dans une console.
+
+1. Ouvrir **Outils › Lancer Claude Code (terminal)**.
+2. Suivre l'assistant de première configuration du CLI (thème, puis connexion à ton compte Claude).
+3. Terminer le processus d'autorisation proposé par le CLI (navigateur, puis code à coller si demandé).
+4. Une fois la connexion faite, ouvrir le panneau ; il fonctionne ensuite sans cette étape.
+
+Tant que cette étape n'est pas faite, le panneau ne peut pas répondre.
+
 ## Compiler et installer
 
 Build de développement, déployé dans l'instance expérimentale (la fermer avant : le déploiement échoue si elle est ouverte) :
