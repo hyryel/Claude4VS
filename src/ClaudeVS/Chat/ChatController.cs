@@ -77,7 +77,9 @@ namespace ClaudeVS.Chat
         private int _restartSeq;                  // invalide un chargement d'historique dépassé par un autre Restart
         private string _claudeCwd;                // dossier de travail du processus en cours (fixé au lancement)
         private readonly EventHandler<Microsoft.VisualStudio.Shell.Events.OpenSolutionEventArgs> _onSolutionOpened;
+        private readonly EventHandler<Microsoft.VisualStudio.Shell.Events.FolderEventArgs> _onFolderOpened;
         private readonly EventHandler _onSolutionClosed;
+        private bool _cwdSwitchPending;           // solution changée pendant un tour : bascule de dossier à la fin du tour
 
         public ChatController(ClaudeVSPackage package, Action<JObject> post)
         {
@@ -85,27 +87,56 @@ namespace ClaudeVS.Chat
             _post = post;
             SelectionTracker.Changed += OnSelectionChanged;
             DebugMonitor.BreakOnException += OnExceptionBreak;
-            _onSolutionOpened = (s, e) => OnSolutionChanged();
-            _onSolutionClosed = (s, e) => OnSolutionChanged();
+            _onSolutionOpened = (s, e) => OnSolutionOpened();
+            _onFolderOpened = (s, e) => OnSolutionOpened();
+            _onSolutionClosed = (s, e) => RunOnUi(PostSettings, "solution");
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenSolution += _onSolutionOpened;
+            Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenFolder += _onFolderOpened;
+            // Fermeture seule : pas de bascule vers le dossier utilisateur, le CLI reste là où il est.
+            // Une ouverture de solution (qui suit toujours la fermeture de la précédente) fera la bascule.
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterCloseSolution += _onSolutionClosed;
         }
 
         /// <summary>
-        /// La solution a changé : le CLI, lui, garde le dossier de son lancement. L'interface continue d'afficher
-        /// et de résoudre les chemins par rapport à ce dossier (EffectiveCwd), et l'utilisateur est prévenu.
+        /// Une solution (ou un dossier) vient d'être ouverte : le CLI doit travailler dans son dossier.
+        /// Un processus ne peut pas changer de dossier de travail : on le relance dans le nouveau. Si un tour est
+        /// en cours, la bascule attend sa fin pour ne pas couper Claude au milieu d'une modification.
         /// </summary>
-        private void OnSolutionChanged()
+        private void OnSolutionOpened()
         {
             RunOnUi(() =>
             {
                 PostSettings();
-                if (_claude?.IsRunning != true || _claudeCwd == null) return;
-                var current = WorkingDirectory();
-                if (string.Equals(current, _claudeCwd, StringComparison.OrdinalIgnoreCase)) return;
-                PostNotice($"La solution a changé, mais Claude travaille toujours dans {_claudeCwd}. "
-                         + $"Démarrez une nouvelle conversation pour passer dans {current}.");
+                if (!NeedsCwdSwitch()) return;
+                if (_busy)
+                {
+                    _cwdSwitchPending = true;
+                    PostNotice($"La solution a changé : Claude passera dans {WorkingDirectory()} à la fin de sa réponse en cours.");
+                    return;
+                }
+                SwitchToSolutionDirectory();
             }, "solution");
+        }
+
+        private bool NeedsCwdSwitch()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return _claude?.IsRunning == true && _claudeCwd != null
+                && !string.Equals(WorkingDirectory(), _claudeCwd, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Relance le CLI dans le dossier de la solution courante (nouvelle conversation).</summary>
+        private void SwitchToSolutionDirectory()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            _cwdSwitchPending = false;
+            if (!NeedsCwdSwitch()) return;
+            var previous = _claudeCwd;
+            Restart(null); // arrête le processus et vide le fil : les conversations sont rangées par dossier
+            var current = WorkingDirectory();
+            PostNotice($"Solution changée : Claude travaille maintenant dans {current}. "
+                     + $"La conversation précédente reste disponible dans l'historique de {previous}.");
+            EnsureStarted(null);
         }
 
         /// <summary>Dossier de référence des chemins : celui du CLI s'il tourne, sinon celui de la solution courante.</summary>
@@ -452,6 +483,7 @@ namespace ClaudeVS.Chat
             var old = _claude;
             _claude = null;
             _claudeCwd = null;
+            _cwdSwitchPending = false;
             _busy = false;
             _cliReady = false;
             ClearPendingPermissions();
@@ -570,7 +602,9 @@ namespace ClaudeVS.Chat
                     ClearPendingPermissions();
                     _editToolUses.Clear();
                     PostStatus("ready");
-                    RequestContextUsage();
+                    // Bascule de dossier reportée : planifiée après ce traitement, pour que le « result » soit d'abord affiché
+                    if (_cwdSwitchPending) RunOnUi(SwitchToSolutionDirectory, "solution");
+                    else RequestContextUsage();
                 }
                 else if (type == "assistant")
                 {
@@ -924,6 +958,7 @@ namespace ClaudeVS.Chat
             SelectionTracker.Changed -= OnSelectionChanged;
             DebugMonitor.BreakOnException -= OnExceptionBreak;
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenSolution -= _onSolutionOpened;
+            Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenFolder -= _onFolderOpened;
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterCloseSolution -= _onSolutionClosed;
             StopProcess();
         }
