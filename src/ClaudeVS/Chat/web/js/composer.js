@@ -10,7 +10,7 @@ import { post } from './host.js';
 import { setChosenModel, setChosenEffort } from './toolbar.js';
 import { ToHost } from './protocol.js';
 import { icon, withIcon } from './icons.js';
-import { addOwnMessage, interrupt, clear, scrollToAgent } from './conversation.js';
+import { addOwnMessage, interrupt, clear, scrollToAgent, takeRewindNotice } from './conversation.js';
 
 // ---------------------------------------------------------------- saisie
 
@@ -45,7 +45,7 @@ export function send() {
   const ctx = !selectionEl.hidden && !selectionEl.classList.contains('off') ? selectionEl.textContent : null;
   addOwnMessage(text, ctx, state.images);
   state.stick = true; scroll();
-  post({ type: ToHost.send, text, images: state.images.map(i => ({ mediaType: i.mediaType, data: i.data })) });
+  post({ type: ToHost.send, text, images: state.images.map(i => ({ mediaType: i.mediaType, data: i.data })), notice: takeRewindNotice() });
   inputEl.value = '';
   state.images = [];
   renderAttachments();

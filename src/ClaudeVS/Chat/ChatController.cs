@@ -188,7 +188,7 @@ namespace ClaudeVS.Chat
                     _permissions.RepostPending();
                     break;
                 case ToHost.Send:
-                    Send((string)msg["text"], msg["images"] as JArray);
+                    Send((string)msg["text"], msg["images"] as JArray, (string)msg["notice"]);
                     break;
                 case ToHost.SearchFiles:
                     SearchFiles((string)msg["query"], (int?)msg["seq"] ?? 0);
@@ -285,7 +285,9 @@ namespace ClaudeVS.Chat
             PostSettings();
         }
 
-        private void Send(string text, JArray images)
+        /// <param name="notice">Avis à transmettre au modèle avec ce message (retour arrière des fichiers), balisé
+        /// &lt;…&gt; par l'interface : bloc séparé, ignoré à l'affichage comme le contexte IDE.</param>
+        private void Send(string text, JArray images, string notice = null)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var hasImages = images != null && images.Count > 0;
@@ -293,6 +295,7 @@ namespace ClaudeVS.Chat
             if (!EnsureStarted(null)) return;
 
             var content = new JArray();
+            if (!string.IsNullOrWhiteSpace(notice)) content.Add(new JObject { ["type"] = "text", ["text"] = notice });
             var context = _attachSelection ? IdePrompts.SelectionContext(SelectionTracker.Latest) : null;
             if (context != null) content.Add(new JObject { ["type"] = "text", ["text"] = context });
             if (hasImages)

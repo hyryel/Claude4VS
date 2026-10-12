@@ -5,7 +5,7 @@ import { post } from './host.js';
 import { ToHost } from './protocol.js';
 import { renderMd } from './markdown.js';
 import { toolSummary, toolDetails } from './tools.js';
-import { addOwnMessage } from './conversation.js';
+import { addOwnMessage, takeRewindNotice } from './conversation.js';
 import { setMode } from './composer.js';
 
 // La carte se place juste sous l'outil concerné (sinon en fin de fil). Outil d'un sous-agent : sous la carte de
@@ -39,7 +39,7 @@ export function permissionCard(m) {
     state.interrupted = true;
     respond({ behavior: 'deny', message: 'L\'utilisateur a refusé cette action et va préciser ce qu\'il veut.', interrupt: true });
     addOwnMessage(reasonText);
-    post({ type: ToHost.send, text: reasonText });
+    post({ type: ToHost.send, text: reasonText, notice: takeRewindNotice() });
   };
 
   if (req.tool_name === 'AskUserQuestion') return place(questionCard(card, input, respond));
