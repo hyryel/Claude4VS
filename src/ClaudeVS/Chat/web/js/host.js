@@ -7,6 +7,7 @@ import {
   onCli, setStatus, clear, renderHistory, onDebugEvent, onContext, onRewindPreview, onRewindDone, showSessions,
 } from './conversation.js';
 import { onPermissionResolved } from './permissions.js';
+import { setApplied } from './toolbar.js';
 import { onInsert, onSelection, onSettings, onFiles } from './composer.js';
 
 const host = window.chrome && window.chrome.webview;
@@ -60,6 +61,7 @@ const handlers = {
   [FromHost.files]: m => onFiles(m),
   [FromHost.theme]: m => onTheme(m),
   [FromHost.banner]: m => onBanner(m),
+  [FromHost.applied]: m => setApplied(m),
 };
 
 // Appelé une fois par main.js, avant l'envoi de « ready »

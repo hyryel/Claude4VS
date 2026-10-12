@@ -7,6 +7,7 @@ import {
   attachEl, sendEl, compactEl, newChatEl, historyEl, closeSessionsEl,
 } from './dom.js';
 import { post } from './host.js';
+import { setChosenModel, setChosenEffort } from './toolbar.js';
 import { ToHost } from './protocol.js';
 import { addOwnMessage, interrupt, clear } from './conversation.js';
 
@@ -46,8 +47,9 @@ export function onSelection(m) {
 }
 
 export function onSettings(m) {
-  modelEl.value = m.model || '';
+  setChosenModel(m.model);
   effortEl.value = m.effort || '';
+  setChosenEffort(m.effort);
   modeEl.value = m.mode;
   selectionEl.classList.toggle('off', !m.attachSelection);
   autoFormatEl.classList.toggle('off', !m.autoFormat);
@@ -205,7 +207,7 @@ export function wireComposer() {
   // Toute la pastille « Claude travaille… | ■ Arrêter » est cliquable, pas seulement le bouton.
   activityEl.onclick = interrupt;
   modeEl.onchange = e => post({ type: ToHost.setMode, mode: e.target.value });
-  modelEl.onchange = e => post({ type: ToHost.setModel, model: e.target.value });
+  modelEl.onchange = e => { setChosenModel(e.target.value); post({ type: ToHost.setModel, model: e.target.value }); };
   effortEl.onchange = e => post({ type: ToHost.setEffort, effort: e.target.value });
   compactEl.onclick = () => {
     if (state.busy) return;

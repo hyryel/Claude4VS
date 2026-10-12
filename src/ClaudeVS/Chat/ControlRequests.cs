@@ -69,6 +69,17 @@ namespace ClaudeVS.Chat
             });
         }
 
+        /// <summary>Modèle et effort réellement appliqués par le CLI (get_settings.applied), pour renseigner les entrées « par défaut ».</summary>
+        public void RequestApplied()
+        {
+            Send(new JObject { ["subtype"] = "get_settings" }, r =>
+            {
+                var applied = r["response"]?["applied"] as JObject;
+                if (applied == null) return;
+                _post(new JObject { ["type"] = FromHost.Applied, ["model"] = applied["model"], ["effort"] = applied["effort"] });
+            });
+        }
+
         /// <summary>Retour arrière des fichiers à l'état précédant un message utilisateur (dry run = aperçu).</summary>
         public void Rewind(string uuid, bool dryRun)
         {

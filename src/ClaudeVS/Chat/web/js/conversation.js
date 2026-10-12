@@ -9,6 +9,7 @@ import { ToHost } from './protocol.js';
 import { onStreamEvent, onAssistant, onSubagentResults } from './stream.js';
 import { onToolResult } from './tools.js';
 import { permissionCard } from './permissions.js';
+import { setModels } from './toolbar.js';
 
 export function setStatus(st) {
   const wasBusy = state.busy;
@@ -161,6 +162,7 @@ const cliHandlers = {
     // Refus d'un set_model / set_permission_mode… : sans ce message, le sélecteur afficherait une valeur non appliquée
     if (r?.subtype === 'error') append(el('div', 'error', 'Commande refusée par le CLI : ' + (r.error || 'erreur inconnue')));
     if (r?.response?.commands) state.commands = r.response.commands;
+    if (r?.response?.models) setModels(r.response.models);
   },
   system: m => {
     if (m.subtype === 'init') {

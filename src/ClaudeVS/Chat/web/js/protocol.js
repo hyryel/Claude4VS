@@ -40,6 +40,7 @@ export const FromHost = Object.freeze({
   rewindPreview: 'rewindPreview',
   rewindDone: 'rewindDone',
   settings: 'settings',
+  applied: 'applied', // modèle et effort réellement appliqués par le CLI
   sessions: 'sessions',
   files: 'files',
   theme: 'theme',

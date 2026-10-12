@@ -10,28 +10,36 @@
 </head>
 <body>
   <header id="toolbar">
-    <select id="model" title="Modèle">
-      <option value="">Modèle par défaut</option>
-      <option value="opus">Opus</option>
-      <option value="sonnet">Sonnet</option>
-      <option value="haiku">Haiku</option>
-    </select>
-    <select id="effort" title="Niveau de réflexion">
-      <option value="">Effort par défaut</option>
-      <option value="low">Effort faible</option>
-      <option value="medium">Effort moyen</option>
-      <option value="high">Effort élevé</option>
-      <option value="xhigh">Effort maximal</option>
-    </select>
-    <select id="mode" title="Mode de permission">
-      <option value="default">Demander</option>
-      <option value="acceptEdits">Accepter les modifications</option>
-      <option value="plan">Plan</option>
-      <option value="bypassPermissions">Tout autoriser</option>
-    </select>
+    <label class="field"><span>Modèle</span>
+      <select id="model" title="Modèle">
+        <option value="">Par défaut</option>
+        <option value="opus">Opus</option>
+        <option value="sonnet">Sonnet</option>
+        <option value="haiku">Haiku</option>
+      </select>
+    </label>
+    <label class="field"><span>Effort</span>
+      <select id="effort" title="Niveau de réflexion">
+        <option value="">Par défaut</option>
+        <option value="low">Faible</option>
+        <option value="medium">Moyen</option>
+        <option value="high">Élevé</option>
+        <option value="xhigh">Maximal</option>
+      </select>
+    </label>
+    <label class="field"><span>Permissions</span>
+      <select id="mode" title="Mode de permission">
+        <option value="default">Demander</option>
+        <option value="acceptEdits">Accepter les modifications</option>
+        <option value="plan">Plan</option>
+        <option value="bypassPermissions">Tout autoriser</option>
+      </select>
+    </label>
     <span class="spacer"></span>
-    <button id="history" class="icon" title="Conversations précédentes" aria-label="Conversations précédentes">🕘</button>
-    <button id="newChat" class="icon" title="Nouvelle conversation" aria-label="Nouvelle conversation"><svg class="glyph" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="5" y="1" width="2" height="10"/><rect x="1" y="5" width="10" height="2"/></svg></button>
+    <span class="actions">
+      <button id="history" class="icon" title="Conversations précédentes" aria-label="Conversations précédentes">🕘</button>
+      <button id="newChat" class="icon" title="Nouvelle conversation" aria-label="Nouvelle conversation"><svg class="glyph" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="5" y="1" width="2" height="10"/><rect x="1" y="5" width="10" height="2"/></svg></button>
+    </span>
   </header>
 
   <div id="banner" role="status" hidden>

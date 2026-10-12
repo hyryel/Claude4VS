@@ -36,7 +36,8 @@ namespace ClaudeVS.Chat
         private bool _autoAnalyzeExceptions = true; // arrêt sur exception dans VS → analyse demandée à Claude
         private JObject _lastExceptionState;
         private bool _busy;
-        private bool _cliReady;                   // le processus courant a répondu (control_response ou system/init)
+        private bool _preloaded;                  // le CLI a déjà été lancé à l'ouverture du panneau
+        private bool _cliReady;                  // le processus courant a répondu (control_response ou system/init)
         private string _mcpConfigPath;            // fichier temporaire contenant le jeton du serveur MCP
         private int _restartSeq;                  // invalide un chargement d'historique dépassé par un autre Restart
         private string _claudeCwd;                // dossier de travail du processus en cours (fixé au lancement)
@@ -79,6 +80,7 @@ namespace ClaudeVS.Chat
             RunOnUi(() =>
             {
                 PostSettings();
+                PreloadCli();
                 if (!NeedsCwdSwitch()) return;
                 if (_busy)
                 {
@@ -88,6 +90,21 @@ namespace ClaudeVS.Chat
                 }
                 SwitchToSolutionDirectory();
             }, "solution");
+        }
+
+        /// <summary>
+        /// Lance le CLI dès l'ouverture du panneau : sa réponse à initialize fournit la liste des modèles, sans coût de
+        /// jetons (aucun message n'est envoyé). Seulement quand une solution est ouverte, pour que le processus
+        /// démarre dans le bon dossier ; sinon la liste attend le premier message.
+        /// </summary>
+        private void PreloadCli()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (_claude != null || _preloaded) return;
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.Equals(_ide.SolutionDirectory(), userProfile, StringComparison.OrdinalIgnoreCase)) return;
+            _preloaded = true; // une seule fois : après « Nouvelle conversation », le processus ne repart qu'au prochain message
+            EnsureStarted(null);
         }
 
         private bool NeedsCwdSwitch()
@@ -163,6 +180,7 @@ namespace ClaudeVS.Chat
                     PostStatus(_claude?.IsRunning == true ? (_busy ? "busy" : "ready") : "idle");
                     PostSettings();
                     OnSelectionChanged(SelectionTracker.Latest);
+                    PreloadCli();
                     // Interface rechargée (plantage WebView2) : les demandes de permission encore ouvertes sont réaffichées
                     _permissions.RepostPending();
                     break;
@@ -198,6 +216,7 @@ namespace ClaudeVS.Chat
                     if (!string.IsNullOrEmpty(model) && !ClaudeSettings.IsValidModel(model)) { RejectSetting("modèle", model); break; }
                     _model = string.IsNullOrEmpty(model) ? null : model;
                     TrySend(() => _claude?.SendControlRequest(new JObject { ["subtype"] = "set_model", ["model"] = _model }));
+                    _controls.RequestApplied(); // le défaut d'effort dépend du modèle
                     PostSettings();
                     break;
                 }
@@ -534,6 +553,8 @@ namespace ClaudeVS.Chat
                     // solution) déclencherait sinon une fausse alerte « ne répond pas depuis 30 s ».
                     _cliReady = true;
                     if (!_busy) PostStatus("ready");
+                    // Réponse à initialize (seule à porter la liste des modèles) : on demande ce que le CLI applique par défaut
+                    if (response?["response"]?["models"] != null) _controls.RequestApplied();
                     // Le gestionnaire produit son propre message vers l'interface (rewindPreview, context…) :
                     // pas de relais brut, sinon une erreur s'afficherait deux fois
                     if (_controls.TryComplete(id, response)) return;

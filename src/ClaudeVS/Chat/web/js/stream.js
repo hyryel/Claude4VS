@@ -4,6 +4,7 @@ import { el, append, scroll } from './dom.js';
 import { renderMd, renderDiagrams } from './markdown.js';
 import { toolElement, toolSummary, setOpen } from './tools.js';
 import { toolLabel } from './conversation.js';
+import { setActualModel } from './toolbar.js';
 
 // Intervalle minimal entre deux rendus markdown d'un même bloc pendant le streaming : chaque rendu reparse tout le
 // texte reçu, son coût croît avec la longueur de la réponse.
@@ -118,6 +119,7 @@ export function onSubagentResults(content) {
 export function onAssistant(m) {
   if (m.parent_tool_use_id) return onSubagentAssistant(m);
   const msg = m.message;
+  setActualModel(msg.model);
   const entry = assistantContainer(msg.id);
   for (const c of msg.content || []) {
     if (c.type === 'tool_use') toolElement(c.id, c.name, c.input, entry.el);
