@@ -55,6 +55,17 @@ button.icon:hover { border-color: var(--input-border); }
 svg.glyph { display: block; fill: currentColor; shape-rendering: crispEdges; }
 /* Même hauteur pour les boutons de la barre, qu'ils contiennent un emoji ou une icône SVG */
 #toolbar button.icon { display: inline-flex; align-items: center; justify-content: center; height: 26px; }
+
+/* Bandeau d'annonce (changement de solution…) : orange, sous la barre d'outils, hors du fil */
+#banner {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 8px 6px 10px; border-bottom: 1px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, var(--bg));
+  border-left: 3px solid var(--warn);
+}
+#banner[hidden] { display: none; }
+#bannerText { flex: 1; font-size: 12px; color: var(--fg); }
+#banner button.icon { padding: 3px 5px; }
 select {
   background: var(--input-bg);
   border: 1px solid var(--input-border);

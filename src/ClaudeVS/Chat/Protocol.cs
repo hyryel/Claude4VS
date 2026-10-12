@@ -49,5 +49,6 @@ namespace ClaudeVS.Chat
         public const string Sessions = "sessions";
         public const string Files = "files";
         public const string Theme = "theme";
+        public const string Banner = "banner";           // bandeau d'annonce en haut du panneau (text null = masquer)
     }
 }

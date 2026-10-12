@@ -1,7 +1,7 @@
 // Canal avec l'extension (WebView2) : envoi des messages et aiguillage de ceux qu'elle poste.
 import { state } from './state.js';
 import { FromHost } from './protocol.js';
-import { el, append, showRenderError, inputEl } from './dom.js';
+import { el, append, showRenderError, inputEl, bannerEl, bannerTextEl, closeBannerEl } from './dom.js';
 import { rerenderDiagrams } from './markdown.js';
 import {
   onCli, setStatus, clear, renderHistory, onDebugEvent, onContext, onRewindPreview, onRewindDone, showSessions,
@@ -20,6 +20,12 @@ function onTheme(m) {
   document.documentElement.style.colorScheme = m.dark ? 'dark' : 'light';
   document.documentElement.classList.toggle('light', !m.dark); // seconde palette sémantique (style.css)
   if (state.darkTheme !== !!m.dark) { state.darkTheme = !!m.dark; rerenderDiagrams(); }
+}
+
+// Bandeau d'annonce hors du fil : survit au vidage de la conversation, reste visible quel que soit le défilement
+function onBanner(m) {
+  bannerTextEl.textContent = m.text || '';
+  bannerEl.hidden = !m.text;
 }
 
 // Les fonctions importées ne sont appelées qu'à la réception d'un message (jamais pendant l'évaluation du module)
@@ -42,10 +48,12 @@ const handlers = {
   [FromHost.sessions]: m => showSessions(m.sessions || []),
   [FromHost.files]: m => onFiles(m),
   [FromHost.theme]: m => onTheme(m),
+  [FromHost.banner]: m => onBanner(m),
 };
 
 // Appelé une fois par main.js, avant l'envoi de « ready »
 export function listen() {
+  closeBannerEl.onclick = () => { bannerEl.hidden = true; };
   host?.addEventListener('message', e => {
     const m = e.data;
     try {

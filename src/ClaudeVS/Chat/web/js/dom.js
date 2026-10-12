@@ -13,6 +13,7 @@ export const modeEl = $('mode'), modelEl = $('model'), effortEl = $('effort'), c
 export const autoFormatEl = $('autoFormat'), autoAnalyzeEl = $('autoAnalyze');
 export const attachEl = $('attach'), sendEl = $('send'), compactEl = $('compact');
 export const newChatEl = $('newChat'), historyEl = $('history'), closeSessionsEl = $('closeSessions');
+export const bannerEl = $('banner'), bannerTextEl = $('bannerText'), closeBannerEl = $('closeBanner');
 
 export function el(tag, cls, text) {
   const e = document.createElement(tag);

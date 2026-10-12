@@ -34,6 +34,11 @@
     <button id="newChat" class="icon" title="Nouvelle conversation" aria-label="Nouvelle conversation"><svg class="glyph" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="5" y="1" width="2" height="10"/><rect x="1" y="5" width="10" height="2"/></svg></button>
   </header>
 
+  <div id="banner" role="status" hidden>
+    <span id="bannerText"></span>
+    <button id="closeBanner" class="icon" title="Fermer" aria-label="Fermer l'annonce"><svg class="glyph" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></button>
+  </div>
+
   <div id="sessions" hidden>
     <div class="sessions-head">Conversations récentes <button id="closeSessions" class="icon" aria-label="Fermer la liste des conversations">✕</button></div>
     <div id="sessionList"></div>

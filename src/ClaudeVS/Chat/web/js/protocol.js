@@ -43,4 +43,5 @@ export const FromHost = Object.freeze({
   sessions: 'sessions',
   files: 'files',
   theme: 'theme',
+  banner: 'banner', // bandeau d'annonce en haut du panneau (text null = masquer)
 });

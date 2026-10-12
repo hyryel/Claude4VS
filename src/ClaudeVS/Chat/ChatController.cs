@@ -83,7 +83,7 @@ namespace ClaudeVS.Chat
                 if (_busy)
                 {
                     _cwdSwitchPending = true;
-                    PostNotice($"La solution a changé : Claude passera dans {_ide.SolutionDirectory()} à la fin de sa réponse en cours.");
+                    PostBanner($"La solution a changé : Claude passera dans {_ide.SolutionDirectory()} à la fin de sa réponse en cours.");
                     return;
                 }
                 SwitchToSolutionDirectory();
@@ -106,7 +106,7 @@ namespace ClaudeVS.Chat
             var previous = _claudeCwd;
             Restart(null); // arrête le processus et vide le fil : les conversations sont rangées par dossier
             var current = _ide.SolutionDirectory();
-            PostNotice($"Solution changée : Claude travaille maintenant dans {current}. "
+            PostBanner($"Solution changée : Claude travaille maintenant dans {current}. "
                      + $"La conversation précédente reste disponible dans l'historique de {previous}.");
             EnsureStarted(null);
             PostSettings(); // le dossier affiché suit le nouveau processus (avant la relance, il montrait encore l'ancien)
@@ -648,6 +648,8 @@ namespace ClaudeVS.Chat
         private void PostStatus(string state) => _post(new JObject { ["type"] = FromHost.Status, ["state"] = state });
         private void PostError(string text) => _post(new JObject { ["type"] = FromHost.Error, ["text"] = text });
         private void PostNotice(string text) => _post(new JObject { ["type"] = FromHost.Notice, ["text"] = text });
+        /// <summary>Annonce importante, hors du fil : bandeau orange sous la barre d'outils, jusqu'à ce que l'utilisateur le ferme.</summary>
+        private void PostBanner(string text) => _post(new JObject { ["type"] = FromHost.Banner, ["text"] = text });
 
         private void PostSettings() => _post(new JObject
         {
