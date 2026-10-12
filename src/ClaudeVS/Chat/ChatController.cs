@@ -19,6 +19,7 @@ namespace ClaudeVS.Chat
 
         private const int HistoryBatchSize = 50;        // messages par lot envoyé au panneau
         private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan UsageRefreshInterval = TimeSpan.FromMinutes(5);  // consommation du forfait, au repos
 
         private readonly ClaudeVSPackage _package;
         private readonly IIdeContext _ide;
@@ -554,7 +555,22 @@ namespace ClaudeVS.Chat
                     _cliReady = true;
                     if (!_busy) PostStatus("ready");
                     // Réponse à initialize (seule à porter la liste des modèles) : on demande ce que le CLI applique par défaut
-                    if (response?["response"]?["models"] != null) _controls.RequestApplied();
+                    // Elle déclenche aussi la consommation du forfait, rafraîchie ensuite toutes les 5 min au repos : elle
+                    // bouge aussi avec les autres sessions (terminal, autre instance), pas seulement à la fin de nos tours
+                    if (response?["response"]?["models"] != null)
+                    {
+                        _controls.RequestApplied();
+                        _controls.RequestUsage();
+                        RunOnUi(async () =>
+                        {
+                            while (true)
+                            {
+                                await Task.Delay(UsageRefreshInterval);
+                                if (source != _claude || !source.IsRunning) return;
+                                if (!_busy) _controls.RequestUsage();
+                            }
+                        }, "usage");
+                    }
                     // Le gestionnaire produit son propre message vers l'interface (rewindPreview, context…) :
                     // pas de relais brut, sinon une erreur s'afficherait deux fois
                     if (_controls.TryComplete(id, response)) return;
@@ -580,7 +596,11 @@ namespace ClaudeVS.Chat
                     PostStatus("ready");
                     // Bascule de dossier reportée : planifiée après ce traitement, pour que le « result » soit d'abord affiché
                     if (_cwdSwitchPending) RunOnUi(SwitchToSolutionDirectory, "solution");
-                    else _controls.RequestContextUsage();
+                    else
+                    {
+                        _controls.RequestContextUsage();
+                        _controls.RequestUsage();
+                    }
                 }
                 else if (type == "assistant")
                 {

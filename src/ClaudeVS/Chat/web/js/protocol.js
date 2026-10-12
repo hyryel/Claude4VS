@@ -37,6 +37,7 @@ export const FromHost = Object.freeze({
   notice: 'notice',
   debugEvent: 'debugEvent',
   context: 'context',
+  usage: 'usage', // consommation du forfait, /usage (limits : plafonds ou null, cost : coût de la session)
   rewindPreview: 'rewindPreview',
   rewindDone: 'rewindDone',
   settings: 'settings',

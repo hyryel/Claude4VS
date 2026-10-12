@@ -6,6 +6,7 @@ import { rerenderDiagrams } from './markdown.js';
 import {
   onCli, setStatus, clear, renderHistory, onDebugEvent, onContext, onRewindPreview, onRewindDone, showSessions,
 } from './conversation.js';
+import { onUsage } from './usage.js';
 import { onPermissionResolved } from './permissions.js';
 import { setApplied } from './toolbar.js';
 import { onInsert, onSelection, onSettings, onFiles } from './composer.js';
@@ -54,6 +55,7 @@ const handlers = {
   [FromHost.notice]: m => append(el('div', 'notice', m.text)),
   [FromHost.debugEvent]: m => onDebugEvent(m),
   [FromHost.context]: m => onContext(m),
+  [FromHost.usage]: m => onUsage(m),
   [FromHost.rewindPreview]: m => onRewindPreview(m),
   [FromHost.rewindDone]: m => onRewindDone(m),
   [FromHost.settings]: m => onSettings(m),

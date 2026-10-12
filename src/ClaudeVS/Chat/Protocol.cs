@@ -43,6 +43,7 @@ namespace ClaudeVS.Chat
         public const string Notice = "notice";
         public const string DebugEvent = "debugEvent";
         public const string Context = "context";
+        public const string Usage = "usage";             // consommation du forfait, /usage (limits : plafonds ou null, cost : coût de la session)
         public const string RewindPreview = "rewindPreview";
         public const string RewindDone = "rewindDone";
         public const string Settings = "settings";

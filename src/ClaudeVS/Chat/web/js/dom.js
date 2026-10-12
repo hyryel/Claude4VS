@@ -7,7 +7,7 @@ import { ToHost } from './protocol.js';
 // rendu) ne peut pas se substituer à un élément de l'application, et $() n'est plus appelé après l'initialisation.
 const $ = id => document.getElementById(id);
 export const messagesEl = $('messages'), inputEl = $('input'), statusEl = $('status'), activityEl = $('activity'), stopEl = $('stop');
-export const welcomeEl = $('welcome'), selectionEl = $('selection'), contextEl = $('context'), slashEl = $('slash');
+export const welcomeEl = $('welcome'), selectionEl = $('selection'), contextEl = $('context'), usageEl = $('usage'), slashEl = $('slash');
 export const sessionsEl = $('sessions'), sessionListEl = $('sessionList'), attachmentsEl = $('attachments'), fileInputEl = $('fileInput');
 export const modeEl = $('mode'), modelEl = $('model'), effortEl = $('effort'), cwdEl = $('cwd');
 export const autoFormatEl = $('autoFormat'), autoAnalyzeEl = $('autoAnalyze');
