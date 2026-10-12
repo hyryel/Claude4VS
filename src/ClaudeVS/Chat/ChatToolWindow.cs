@@ -48,7 +48,20 @@ namespace ClaudeVS.Chat
         private const int MaxQueued = 500;   // messages gardés en attendant que l'interface soit prête
         private readonly ClaudeVSPackage _package;
         private readonly ThemeChangedEventHandler _onThemeChanged;
-        private WebView2 _web = new WebView2();
+        private IWebView2 _web = CreateWebView();
+
+        /// <summary>
+        /// WebView2CompositionControl (rendu composé par WPF) quand la DLL de VS l'expose (VS 2026) : un panneau de VS
+        /// posé par-dessus masque alors le chat et reçoit ses clics. Sinon (VS 2022, type encore interne) : WebView2,
+        /// fenêtre native toujours dessinée devant le contenu WPF.
+        /// </summary>
+        private static IWebView2 CreateWebView()
+        {
+            var composition = typeof(WebView2).Assembly.GetType("Microsoft.Web.WebView2.Wpf.WebView2CompositionControl");
+            if (composition != null && composition.IsPublic && typeof(IWebView2).IsAssignableFrom(composition))
+                return (IWebView2)Activator.CreateInstance(composition);
+            return new WebView2();
+        }
         private readonly List<string> _queue = new List<string>();
         private bool _uiReady;
         private bool _initFailed;
@@ -178,7 +191,7 @@ namespace ClaudeVS.Chat
                     case CoreWebView2ProcessFailedKind.BrowserProcessExited:
                         _uiReady = false;
                         try { _web.Dispose(); } catch { }
-                        _web = new WebView2();
+                        _web = CreateWebView();
                         Content = _web;
                         _initialized = false;
                         Post(banner);
