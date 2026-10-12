@@ -36,7 +36,7 @@ namespace ClaudeVS.Chat
         private bool _autoAnalyzeExceptions = true; // arrêt sur exception dans VS → analyse demandée à Claude
         private JObject _lastExceptionState;
         private bool _busy;
-        private bool _cliReady;                   // system/init reçu du processus courant
+        private bool _cliReady;                   // le processus courant a répondu (control_response ou system/init)
         private string _mcpConfigPath;            // fichier temporaire contenant le jeton du serveur MCP
         private int _restartSeq;                  // invalide un chargement d'historique dépassé par un autre Restart
         private string _claudeCwd;                // dossier de travail du processus en cours (fixé au lancement)
@@ -109,6 +109,7 @@ namespace ClaudeVS.Chat
             PostNotice($"Solution changée : Claude travaille maintenant dans {current}. "
                      + $"La conversation précédente reste disponible dans l'historique de {previous}.");
             EnsureStarted(null);
+            PostSettings(); // le dossier affiché suit le nouveau processus (avant la relance, il montrait encore l'ancien)
         }
 
         /// <summary>Dossier de référence des chemins : celui du CLI s'il tourne, sinon celui de la solution courante.</summary>
@@ -527,6 +528,10 @@ namespace ClaudeVS.Chat
                 {
                     var response = msg["response"] as JObject;
                     var id = (string)response?["request_id"];
+                    // Toute réponse de contrôle (à commencer par celle d'« initialize ») prouve que le CLI est vivant.
+                    // system/init, lui, n'arrive qu'avec le premier message : un CLI relancé à vide (changement de
+                    // solution) déclencherait sinon une fausse alerte « ne répond pas depuis 30 s ».
+                    _cliReady = true;
                     if (!_busy) PostStatus("ready");
                     // Le gestionnaire produit son propre message vers l'interface (rewindPreview, context…) :
                     // pas de relais brut, sinon une erreur s'afficherait deux fois
