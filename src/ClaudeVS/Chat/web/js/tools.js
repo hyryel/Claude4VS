@@ -89,5 +89,11 @@ export function onToolResult(r) {
     const pre = el('pre', 'block wrap', text.length > 4000 ? text.slice(0, 4000) + '\n…' : text);
     t.querySelector('.tool-body').appendChild(pre);
   }
-  if (r.is_error) setOpen(t, true);
+  // Erreur : la carte reste repliée ; une ligne de résumé (1re ligne utile du message) reste visible sous l'en-tête,
+  // le détail complet est dans le corps, à déplier au clic.
+  if (r.is_error && text) {
+    const first = text.split('\n').map(s => s.trim()).find(Boolean) || '';
+    const summary = first.replace(/^(Error|Erreur)\s*:\s*/i, '').replace(/\s*:\s*$/, ''); // « …applied: » annonçait la liste repliée
+    t.querySelector('.tool-head').after(el('div', 'tool-error-summary', summary.length > 160 ? summary.slice(0, 160) + '…' : summary));
+  }
 }

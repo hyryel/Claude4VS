@@ -152,6 +152,8 @@ details.thinking .content { white-space: pre-wrap; padding: 4px 0 4px 12px; }
 .tool.ok .state { color: var(--ok); }
 .tool.error .state { color: var(--err); }
 .tool-body { display: none; padding: 0 8px 8px; }
+/* Erreur d'outil : résumé d'une ligne toujours visible, détail dans le corps repliable */
+.tool-error-summary { padding: 0 8px 5px; color: var(--err); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool.open .tool-body { display: block; }
 .tool-body pre { margin: 6px 0 0; max-height: 300px; overflow: auto; }
 pre.block.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
