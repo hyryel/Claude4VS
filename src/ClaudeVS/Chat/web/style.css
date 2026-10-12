@@ -208,6 +208,8 @@ a.file:hover { text-decoration: underline; }
   background: color-mix(in srgb, var(--warn) 7%, var(--bg));
 }
 .perm .title { font-weight: 600; margin-bottom: 4px; }
+.perm .gist { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 4px; }
+.perm details.cmd > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .perm .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .perm input[type=text] { flex: 1; min-width: 120px; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--input-border); border-radius: 4px; padding: 3px 6px; }
 .perm.resolved { border-color: var(--border); background: transparent; opacity: .75; }

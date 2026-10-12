@@ -1,6 +1,6 @@
 // Demandes de permission du CLI : cartes d'autorisation, de plan et de question.
 import { state, tools, perms } from './state.js';
-import { el, append, scroll, modeEl } from './dom.js';
+import { el, append, scroll, modeEl, short } from './dom.js';
 import { post } from './host.js';
 import { ToHost } from './protocol.js';
 import { renderMd } from './markdown.js';
@@ -54,8 +54,23 @@ export function permissionCard(m) {
   }
 
   card.appendChild(el('div', 'title', `Autoriser ${req.display_name || req.tool_name} ?`));
-  if (req.description && req.description !== toolSummary(req.tool_name, input)) card.appendChild(el('div', null, req.description));
-  card.appendChild(toolDetails(req.tool_name, input));
+  // Bash / PowerShell : une ligne qui dit ce que fait la commande (phrase écrite par le modèle dans input.description),
+  // la commande complète dessous, repliée si elle est longue
+  const isShell = req.tool_name === 'Bash' || req.tool_name === 'PowerShell';
+  const command = isShell ? input.command || '' : '';
+  const lines = command.split('\n').length;
+  const longCommand = lines > 5 || command.length > 400;
+  const gist = isShell ? input.description || req.description || (longCommand ? command : '') : req.description;
+  if (gist && (isShell || gist !== toolSummary(req.tool_name, input))) {
+    const line = card.appendChild(el('div', 'gist', short(gist.trim().split('\n')[0], 80)));
+    line.title = gist;
+  }
+  const details = toolDetails(req.tool_name, input);
+  if (longCommand) {
+    const box = card.appendChild(el('details', 'cmd'));
+    box.appendChild(el('summary', null, `Commande complète (${lines} ligne${lines > 1 ? 's' : ''})`));
+    box.appendChild(details);
+  } else card.appendChild(details);
   if (req.decision_reason) card.appendChild(el('div', 'outcome', req.decision_reason));
   const isEdit = ['Edit', 'MultiEdit', 'Write'].includes(req.tool_name);
   if (isEdit) card.appendChild(el('div', 'outcome', 'Le diff est ouvert dans Visual Studio : vous pouvez aussi décider (et retoucher) là-bas.'));
