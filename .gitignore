@@ -4,3 +4,4 @@ obj/
 *.user
 
 src/ClaudeVS/Properties/PublishProfiles/
+dist/
