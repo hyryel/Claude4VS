@@ -564,7 +564,9 @@ namespace ClaudeVS.Chat
                 {
                     TrackEditToolUses(msg["message"]?["content"] as JArray);
                 }
-                else if (type == "user" && msg["tool_use_result"]?["filePath"] is JValue fp)
+                // tool_use_result est un objet pour les outils intégrés (Edit/Write…), mais une simple chaîne quand un outil
+                // MCP échoue : l'indexer directement levait une exception et le message n'était jamais relayé à l'interface
+                else if (type == "user" && (msg["tool_use_result"] as JObject)?["filePath"] is JValue fp)
                 {
                     // Fichier écrit par Claude (Edit/Write/MultiEdit) : passage de Mettre en forme le document
                     var results = msg["message"]?["content"] as JArray;
