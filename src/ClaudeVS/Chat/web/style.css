@@ -58,14 +58,23 @@ svg.glyph { display: block; fill: currentColor; shape-rendering: crispEdges; }
 
 /* Bandeau d'annonce (changement de solution…) : orange, sous la barre d'outils, hors du fil */
 #banner {
+  position: relative; /* ancre de la barre de décompte */
   display: flex; align-items: flex-start; gap: 8px;
   padding: 6px 8px 6px 10px; border-bottom: 1px solid var(--warn);
   background: color-mix(in srgb, var(--warn) 16%, var(--bg));
   border-left: 3px solid var(--warn);
 }
 #banner[hidden] { display: none; }
-#bannerText { flex: 1; font-size: 12px; color: var(--fg); }
+#bannerText { flex: 1; font-size: 12px; color: var(--fg); white-space: pre-line; } /* \n du C# = une phrase par ligne */
 #banner button.icon { padding: 3px 5px; }
+/* Fermeture automatique : barre qui décroît de toute la largeur à zéro en 5 s ; sa fin ferme le bandeau (host.js) */
+#banner.auto::after {
+  content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+  background: var(--warn); transform-origin: left;
+  animation: banner-countdown 5s linear forwards;
+}
+#banner.auto:hover::after { animation-play-state: paused; } /* le temps de lire */
+@keyframes banner-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 select {
   background: var(--input-bg);
   border: 1px solid var(--input-border);

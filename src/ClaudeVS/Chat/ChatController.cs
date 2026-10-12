@@ -106,7 +106,7 @@ namespace ClaudeVS.Chat
             var previous = _claudeCwd;
             Restart(null); // arrête le processus et vide le fil : les conversations sont rangées par dossier
             var current = _ide.SolutionDirectory();
-            PostBanner($"Solution changée : Claude travaille maintenant dans {current}. "
+            PostBanner($"Solution changée : Claude travaille maintenant dans {current}.\n"
                      + $"La conversation précédente reste disponible dans l'historique de {previous}.");
             EnsureStarted(null);
             PostSettings(); // le dossier affiché suit le nouveau processus (avant la relance, il montrait encore l'ancien)

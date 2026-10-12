@@ -22,10 +22,19 @@ function onTheme(m) {
   if (state.darkTheme !== !!m.dark) { state.darkTheme = !!m.dark; rerenderDiagrams(); }
 }
 
-// Bandeau d'annonce hors du fil : survit au vidage de la conversation, reste visible quel que soit le défilement
+// Bandeau d'annonce hors du fil : survit au vidage de la conversation, reste visible quel que soit le défilement.
+// Affiché pendant que Claude travaille (« passera dans … à la fin de sa réponse »), il reste jusqu'à être remplacé ;
+// sinon il se ferme seul au bout de 5 s : une barre décroît en bas du bandeau (animation CSS « auto »), et c'est la
+// fin de l'animation qui le ferme. Souris dessus : l'animation est en pause (style.css), elle reprend où elle en était.
+function hideBanner() { bannerEl.hidden = true; bannerEl.classList.remove('auto'); }
 function onBanner(m) {
+  bannerEl.classList.remove('auto');
   bannerTextEl.textContent = m.text || '';
   bannerEl.hidden = !m.text;
+  if (m.text && !state.busy) {
+    void bannerEl.offsetWidth; // relance l'animation si un bandeau à décompte en remplace un autre
+    bannerEl.classList.add('auto');
+  }
 }
 
 // Les fonctions importées ne sont appelées qu'à la réception d'un message (jamais pendant l'évaluation du module)
@@ -34,7 +43,9 @@ const handlers = {
   [FromHost.status]: m => setStatus(m.state),
   [FromHost.error]: m => append(el('div', 'error', m.text)),
   [FromHost.permissionResolved]: m => onPermissionResolved(m.requestId, m.behavior),
-  [FromHost.cleared]: () => clear(),
+  // Nouvelle conversation, reprise ou bascule de solution : l'annonce précédente n'a plus d'objet. Lors d'une bascule,
+  // le C# poste « cleared » AVANT le nouveau bandeau, qui s'affiche donc bien ensuite.
+  [FromHost.cleared]: () => { clear(); hideBanner(); },
   [FromHost.history]: m => renderHistory(m.messages || [], m.last ?? true),
   [FromHost.insert]: m => onInsert(m),
   [FromHost.selection]: m => onSelection(m),
@@ -53,7 +64,8 @@ const handlers = {
 
 // Appelé une fois par main.js, avant l'envoi de « ready »
 export function listen() {
-  closeBannerEl.onclick = () => { bannerEl.hidden = true; };
+  closeBannerEl.onclick = hideBanner;
+  bannerEl.addEventListener('animationend', e => { if (e.animationName === 'banner-countdown') hideBanner(); });
   host?.addEventListener('message', e => {
     const m = e.data;
     try {
