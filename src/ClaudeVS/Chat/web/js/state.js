@@ -11,6 +11,7 @@ export const state = {
   darkTheme: true,
   keepClasses: false,       // vrai le temps de nettoyer un SVG mermaid, dont le style repose sur ses classes
   rewindCard: null,
+  rewindNotices: [],        // retours arrière pas encore signalés au modèle : { message, files (relatifs) }
   images: [],               // { mediaType, data (base64), url (aperçu) }
   // suggestions « / » et « @ »
   popupItems: [],

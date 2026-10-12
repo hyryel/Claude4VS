@@ -148,10 +148,30 @@ export function onRewindDone(m) {
     done.appendChild(withIcon(el('div', 'title'), 'rewind', `Retour arrière effectué : ${files.length} fichier(s) restauré(s)`));
     if (files.length) { const ul = done.appendChild(el('ul')); for (const f of files) ul.appendChild(el('li', null, f)); }
     if (quoted) done.appendChild(el('div', 'outcome', `État rétabli : celui d'avant le message « ${quoted} ». La conversation est conservée.`));
+    if (files.length) {
+      state.rewindNotices.push({ message: info.message, files });
+      done.appendChild(el('div', 'outcome', 'Claude en sera informé avec votre prochain message.'));
+    }
   } else withIcon(done, 'rewind', 'Retour arrière échoué : ' + (m.error || 'erreur inconnue'));
   append(done);
   // L'utilisateur a remonté le fil pour cliquer sur ↶ : le défilement automatique est suspendu, on l'amène à la confirmation
   done.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// Le retour arrière garde la conversation : sans avis, le modèle croit ses modifications encore en place (Edit sur
+// un texte disparu). L'avis part avec le message suivant, dans un bloc à part commençant par « < » : ignoré à
+// l'affichage (rejeu, historique) comme le contexte IDE. Renvoie null s'il n'y a rien à signaler ; vide la file.
+export function takeRewindNotice() {
+  if (!state.rewindNotices.length) return null;
+  const parts = state.rewindNotices.map(n => {
+    const msg = n.message.length > 200 ? n.message.slice(0, 200) + '…' : n.message;
+    return (msg ? `Files restored to their state before the user message "${msg}":\n` : 'Files restored to an earlier state:\n')
+      + n.files.map(f => `- ${f}`).join('\n');
+  });
+  state.rewindNotices = [];
+  return '<rewind_notice>The user used the IDE\'s file rewind. The conversation was kept, but the file changes made '
+    + 'since then are undone on disk.\n' + parts.join('\n\n')
+    + '\nYour earlier edits to these files are no longer present: re-read them before editing or reasoning about them.</rewind_notice>';
 }
 
 // ---------------------------------------------------------------- flux du CLI
@@ -266,6 +286,7 @@ export function clear() {
   messagesEl.replaceChildren(welcomeEl);
   messages.clear(); streamed.clear(); tools.clear(); perms.clear(); subTools.clear();
   state.currentAssistant = null; state.currentMessageId = null; state.rewindCard = null; state.interrupted = false;
+  state.rewindNotices = []; // nouvelle conversation : l'avis ne la concerne pas
   contextEl.hidden = true;
   updateAgents();
 }
