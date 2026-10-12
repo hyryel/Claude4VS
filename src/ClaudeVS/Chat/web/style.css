@@ -146,6 +146,14 @@ details.thinking .content { white-space: pre-wrap; padding: 4px 0 4px 12px; }
 .tool-head { display: flex; gap: 6px; align-items: baseline; padding: 4px 8px; cursor: pointer; }
 .tool-head:focus-visible, .session:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .tool-head .name { font-weight: 600; white-space: nowrap; }
+/* Chevron dessiné en CSS (pas de glyphe) : → replié, ↓ déplié ; signale que la carte se déplie */
+.tool-head::before {
+  content: ""; flex: none; align-self: center; width: 5px; height: 5px; margin: 0 2px 0 0;
+  border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg); transition: transform .12s;
+}
+.tool.open > .tool-head::before { transform: rotate(45deg); }
+.tool-head:hover::before { border-color: var(--fg); }
 .tool-head .summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-family: Consolas, monospace; }
 .tool-head .state { white-space: nowrap; }
 .tool.running .state::after { content: "…"; }
