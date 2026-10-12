@@ -46,6 +46,8 @@ namespace ClaudeVS.Chat
         private readonly EventHandler<Microsoft.VisualStudio.Shell.Events.FolderEventArgs> _onFolderOpened;
         private readonly EventHandler _onSolutionClosed;
         private bool _cwdSwitchPending;           // solution changée pendant un tour : bascule de dossier à la fin du tour
+        // Annulé à la fermeture du panneau : la boucle du forfait ne doit pas retenir VS (son arrêt attend les tâches)
+        private readonly System.Threading.CancellationTokenSource _closing = new System.Threading.CancellationTokenSource();
 
         /// <param name="ide">null = Visual Studio (VsIdeContext) ; autre implémentation pour les tests.</param>
         public ChatController(ClaudeVSPackage package, Action<JObject> post, IIdeContext ide = null)
@@ -586,9 +588,10 @@ namespace ClaudeVS.Chat
                         _controls.RequestUsage();
                         RunOnUi(async () =>
                         {
-                            while (true)
+                            while (!_closing.IsCancellationRequested)
                             {
-                                await Task.Delay(UsageRefreshInterval);
+                                try { await Task.Delay(UsageRefreshInterval, _closing.Token); }
+                                catch (System.OperationCanceledException) { return; }
                                 if (source != _claude || !source.IsRunning) return;
                                 if (!_busy) _controls.RequestUsage();
                             }
@@ -741,6 +744,7 @@ namespace ClaudeVS.Chat
         public void Dispose()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
+            _closing.Cancel();
             SelectionTracker.Changed -= OnSelectionChanged;
             DebugMonitor.BreakOnException -= OnExceptionBreak;
             Microsoft.VisualStudio.Shell.Events.SolutionEvents.OnAfterOpenSolution -= _onSolutionOpened;
