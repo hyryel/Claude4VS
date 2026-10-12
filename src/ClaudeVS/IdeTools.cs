@@ -271,9 +271,26 @@ namespace ClaudeVS
             IVsTextView vsView;
             // Onglet provisoire (aperçu) si demandé, comme un simple clic dans l'Explorateur de solutions
             using (preview ? new NewDocumentStateScope(__VSNEWDOCUMENTSTATE.NDS_Provisional, VSConstants.NewDocumentStateReason.Navigation) : null)
-                VsShellUtilities.OpenDocument(_package, path, Guid.Empty, out _, out _, out frame, out vsView);
-            // makeFrontmost = false : l'onglet est ouvert sans voler le focus à l'éditeur courant
-            if (makeFrontmost) frame?.Show(); else frame?.ShowNoActivate();
+            {
+                if (makeFrontmost)
+                {
+                    VsShellUtilities.OpenDocument(_package, path, Guid.Empty, out _, out _, out frame, out vsView);
+                    frame?.Show(); // déjà ouvert : le ramène au premier plan
+                }
+                else
+                {
+                    // VsShellUtilities.OpenDocument active l'onglet lui-même : ShowNoActivate venait trop tard. L'API de bas
+                    // niveau crée la fenêtre sans l'afficher ; on l'affiche ensuite sans lui donner le focus.
+                    frame = null;
+                    if (Package.GetGlobalService(typeof(SVsUIShellOpenDocument)) is IVsUIShellOpenDocument opener)
+                    {
+                        var logicalView = VSConstants.LOGVIEWID_Primary;
+                        ErrorHandler.ThrowOnFailure(opener.OpenDocumentViaProject(path, ref logicalView, out _, out _, out _, out frame));
+                    }
+                    frame?.ShowNoActivate();
+                    vsView = frame != null ? VsShellUtilities.GetTextView(frame) : null;
+                }
+            }
             if (string.IsNullOrEmpty(startText) || vsView == null)
                 return Result("Opened file: " + path);
 
