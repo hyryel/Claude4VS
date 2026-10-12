@@ -6,7 +6,7 @@ import { toolLabel } from './conversation.js';
 export function toolSummary(name, input) {
   if (!input) return '';
   switch (name) {
-    case 'Bash': case 'PowerShell': return input.command;
+    case 'Bash': case 'PowerShell': return input.description || input.command;
     case 'Read': case 'Edit': case 'MultiEdit': case 'Write': case 'NotebookEdit': return rel(input.file_path || input.notebook_path);
     case 'Grep': return input.pattern + (input.path ? '  ' + rel(input.path) : '');
     case 'Glob': return input.pattern;
