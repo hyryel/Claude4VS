@@ -41,6 +41,9 @@ namespace ClaudeVS.Chat
                 idx = text.IndexOf(oldString, StringComparison.Ordinal);
             }
             if (idx < 0) throw new InvalidOperationException("old_string introuvable");
+            // Le texte inséré prend les fins de ligne du fichier, même quand old_string (une seule ligne) a été trouvé tel
+            // quel : sinon l'aperçu mélange \n et \r\n (« Inconsistent Line Endings » dans le diff)
+            if (text.Contains("\r\n")) newString = newString.Replace("\r\n", "\n").Replace("\n", "\r\n");
             return all ? text.Replace(oldString, newString) : text.Substring(0, idx) + newString + text.Substring(idx + oldString.Length);
         }
 
