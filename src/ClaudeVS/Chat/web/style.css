@@ -8,7 +8,8 @@
   --input-bg: #2b2b2b;
   --input-fg: #e6e6e6;
   --input-border: #444;
-  --muted: color-mix(in srgb, var(--fg) 55%, transparent);
+  /* 70 % : contraste ≥ 5,6 sur tous les fonds, thèmes clair et sombre de VS (55 % donnait 3,55 en clair) */
+  --muted: color-mix(in srgb, var(--fg) 70%, transparent);
   --subtle-bg: color-mix(in srgb, var(--fg) 6%, var(--bg));
   --user-bg: color-mix(in srgb, var(--accent) 16%, var(--bg));
   --ok: #3fb950;
