@@ -64,7 +64,7 @@ namespace ClaudeVS.Chat
                     if (kind == "used" || kind == "deferred") used += tokens;
                     if (kind != "free") details.Add(new JObject { ["name"] = c["name"], ["tokens"] = tokens });
                 }
-                _post(new JObject { ["type"] = "context", ["used"] = used, ["total"] = total, ["details"] = details });
+                _post(new JObject { ["type"] = FromHost.Context, ["used"] = used, ["total"] = total, ["details"] = details });
             });
         }
 
@@ -80,7 +80,7 @@ namespace ClaudeVS.Chat
                 var error = (string)r["error"] ?? (string)resp["error"];
                 _post(new JObject
                 {
-                    ["type"] = dryRun ? "rewindPreview" : "rewindDone",
+                    ["type"] = dryRun ? FromHost.RewindPreview : FromHost.RewindDone,
                     ["uuid"] = uuid,
                     ["ok"] = (string)r["subtype"] == "success" && error == null,
                     ["error"] = error,
@@ -95,7 +95,7 @@ namespace ClaudeVS.Chat
             if (!sent)
                 _post(new JObject
                 {
-                    ["type"] = dryRun ? "rewindPreview" : "rewindDone", ["uuid"] = uuid, ["ok"] = false,
+                    ["type"] = dryRun ? FromHost.RewindPreview : FromHost.RewindDone, ["uuid"] = uuid, ["ok"] = false,
                     ["error"] = "claude n'est pas démarré : reprenez la conversation (Reprendre) pour restaurer les fichiers.",
                 });
         }

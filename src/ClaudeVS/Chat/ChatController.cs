@@ -158,31 +158,31 @@ namespace ClaudeVS.Chat
             ThreadHelper.ThrowIfNotOnUIThread();
             switch ((string)msg["type"])
             {
-                case "ready":
+                case ToHost.Ready:
                     PostStatus(_claude?.IsRunning == true ? (_busy ? "busy" : "ready") : "idle");
                     PostSettings();
                     OnSelectionChanged(SelectionTracker.Latest);
                     // Interface rechargée (plantage WebView2) : les demandes de permission encore ouvertes sont réaffichées
                     _permissions.RepostPending();
                     break;
-                case "send":
+                case ToHost.Send:
                     Send((string)msg["text"], msg["images"] as JArray);
                     break;
-                case "searchFiles":
+                case ToHost.SearchFiles:
                     SearchFiles((string)msg["query"], (int?)msg["seq"] ?? 0);
                     break;
-                case "interrupt":
+                case ToHost.Interrupt:
                     // Réponse consommée ici : un refus du CLI (tour déjà terminé) n'a pas à s'afficher en erreur
                     _controls.Send(new JObject { ["subtype"] = "interrupt" }, _ => { });
                     break;
-                case "permission":
+                case ToHost.Permission:
                     _permissions.Resolve((string)msg["requestId"], (JObject)msg["response"]);
                     break;
-                case "showDiff":
+                case ToHost.ShowDiff:
                     var req = (string)msg["requestId"];
                     if (_permissions.TryGet(req, out var request)) _permissions.ShowEditDiff(req, request);
                     break;
-                case "setMode":
+                case ToHost.SetMode:
                 {
                     var mode = (string)msg["mode"] ?? "default";
                     if (!ClaudeSettings.IsValidMode(mode)) { RejectSetting("mode", mode); break; }
@@ -191,7 +191,7 @@ namespace ClaudeVS.Chat
                     PostSettings();
                     break;
                 }
-                case "setModel":
+                case ToHost.SetModel:
                 {
                     var model = (string)msg["model"];
                     if (!string.IsNullOrEmpty(model) && !ClaudeSettings.IsValidModel(model)) { RejectSetting("modèle", model); break; }
@@ -200,7 +200,7 @@ namespace ClaudeVS.Chat
                     PostSettings();
                     break;
                 }
-                case "setEffort":
+                case ToHost.SetEffort:
                 {
                     var effort = (string)msg["effort"];
                     if (!string.IsNullOrEmpty(effort) && !ClaudeSettings.IsValidEffort(effort)) { RejectSetting("effort", effort); break; }
@@ -218,34 +218,34 @@ namespace ClaudeVS.Chat
                     PostSettings();
                     break;
                 }
-                case "rewind":
+                case ToHost.Rewind:
                     _controls.Rewind((string)msg["uuid"], (bool?)msg["dryRun"] ?? false);
                     break;
-                case "setAttachSelection":
+                case ToHost.SetAttachSelection:
                     _attachSelection = (bool?)msg["value"] ?? true;
                     PostSettings();
                     break;
-                case "setAutoFormat":
+                case ToHost.SetAutoFormat:
                     _autoFormat = (bool?)msg["value"] ?? false;
                     PostSettings();
                     break;
-                case "setAutoAnalyze":
+                case ToHost.SetAutoAnalyze:
                     _autoAnalyzeExceptions = (bool?)msg["value"] ?? true;
                     PostSettings();
                     break;
-                case "analyzeException":
+                case ToHost.AnalyzeException:
                     if (_lastExceptionState != null) Send(IdePrompts.ExceptionPrompt(_lastExceptionState), null);
                     break;
-                case "newChat":
+                case ToHost.NewChat:
                     Restart(null);
                     break;
-                case "listSessions":
+                case ToHost.ListSessions:
                     ListSessions();
                     break;
-                case "resume":
+                case ToHost.Resume:
                     Restart((string)msg["sessionId"]);
                     break;
-                case "openFile":
+                case ToHost.OpenFile:
                     OpenFile((string)msg["path"], (int?)msg["line"]);
                     break;
             }
@@ -321,7 +321,7 @@ namespace ClaudeVS.Chat
             RunOnUi(async () =>
             {
                 var files = await _files.SearchAsync(root, query);
-                _post(new JObject { ["type"] = "files", ["seq"] = seq, ["files"] = new JArray(files) });
+                _post(new JObject { ["type"] = FromHost.Files, ["seq"] = seq, ["files"] = new JArray(files) });
             }, "files");
         }
 
@@ -333,7 +333,7 @@ namespace ClaudeVS.Chat
             var mention = "@" + rel.Replace('\\', '/');
             if (lineStart.HasValue)
                 mention += lineEnd.HasValue && lineEnd != lineStart ? $"#L{lineStart + 1}-{lineEnd + 1}" : $"#L{lineStart + 1}";
-            _post(new JObject { ["type"] = "insert", ["text"] = mention + " " });
+            _post(new JObject { ["type"] = FromHost.Insert, ["text"] = mention + " " });
         }
 
         // ---- Cycle de vie du processus ------------------------------------------------------
@@ -407,7 +407,7 @@ namespace ClaudeVS.Chat
             ThreadHelper.ThrowIfNotOnUIThread();
             var seq = ++_restartSeq;
             StopProcess();
-            _post(new JObject { ["type"] = "cleared" });
+            _post(new JObject { ["type"] = FromHost.Cleared });
             PostStatus("idle"); // y compris pendant le chargement d'un historique : pas de « Claude travaille… » résiduel
             if (resumeSessionId == null) return;
 
@@ -422,7 +422,7 @@ namespace ClaudeVS.Chat
                 {
                     var batch = new JArray(messages.Skip(i).Take(HistoryBatchSize));
                     var last = i + HistoryBatchSize >= messages.Count;
-                    _post(new JObject { ["type"] = "history", ["messages"] = batch, ["last"] = last });
+                    _post(new JObject { ["type"] = FromHost.History, ["messages"] = batch, ["last"] = last });
                 }
                 if (_claude != null)
                 {
@@ -440,7 +440,7 @@ namespace ClaudeVS.Chat
             RunOnUi(async () =>
             {
                 var sessions = await Task.Run(() => SessionStore.List(cwd, _ide.Log));
-                _post(new JObject { ["type"] = "sessions", ["sessions"] = sessions });
+                _post(new JObject { ["type"] = FromHost.Sessions, ["sessions"] = sessions });
             }, "sessions");
         }
 
@@ -570,7 +570,7 @@ namespace ClaudeVS.Chat
                 }
 
                 // Relais avant tout traitement faillible : la carte de permission doit s'afficher même si le diff échoue
-                _post(new JObject { ["type"] = "cli", ["msg"] = msg });
+                _post(new JObject { ["type"] = FromHost.Cli, ["msg"] = msg });
                 if (editRequestId != null && _permissions.TryGet(editRequestId, out var editRequest))
                     _permissions.ShowEditDiff(editRequestId, editRequest);
             }, "cli");
@@ -602,7 +602,7 @@ namespace ClaudeVS.Chat
             ThreadHelper.ThrowIfNotOnUIThread();
             _lastExceptionState = state;
             var auto = _autoAnalyzeExceptions && _claude?.IsRunning == true && !_busy;
-            _post(new JObject { ["type"] = "debugEvent", ["state"] = state, ["auto"] = auto });
+            _post(new JObject { ["type"] = FromHost.DebugEvent, ["state"] = state, ["auto"] = auto });
             if (auto) Send(IdePrompts.ExceptionPrompt(state), null);
         }
 
@@ -625,8 +625,8 @@ namespace ClaudeVS.Chat
 
         private void OnSelectionChanged(JObject sel)
         {
-            if (sel == null) { _post(new JObject { ["type"] = "selection", ["label"] = null }); return; }
-            _post(new JObject { ["type"] = "selection", ["label"] = IdePrompts.SelectionLabel(sel) });
+            if (sel == null) { _post(new JObject { ["type"] = FromHost.Selection, ["label"] = null }); return; }
+            _post(new JObject { ["type"] = FromHost.Selection, ["label"] = IdePrompts.SelectionLabel(sel) });
         }
 
         private void OpenFile(string path, int? line)
@@ -640,13 +640,13 @@ namespace ClaudeVS.Chat
 
         // ---- Vers l'interface ---------------------------------------------------------------------
 
-        private void PostStatus(string state) => _post(new JObject { ["type"] = "status", ["state"] = state });
-        private void PostError(string text) => _post(new JObject { ["type"] = "error", ["text"] = text });
-        private void PostNotice(string text) => _post(new JObject { ["type"] = "notice", ["text"] = text });
+        private void PostStatus(string state) => _post(new JObject { ["type"] = FromHost.Status, ["state"] = state });
+        private void PostError(string text) => _post(new JObject { ["type"] = FromHost.Error, ["text"] = text });
+        private void PostNotice(string text) => _post(new JObject { ["type"] = FromHost.Notice, ["text"] = text });
 
         private void PostSettings() => _post(new JObject
         {
-            ["type"] = "settings",
+            ["type"] = FromHost.Settings,
             ["model"] = _model ?? "",
             ["effort"] = _effort ?? "",
             ["mode"] = _permissionMode,

@@ -113,7 +113,7 @@ namespace ClaudeVS.Chat
                     JObject msg;
                     try { msg = JObject.Parse(e.WebMessageAsJson); }
                     catch (Exception ex) { _package.Log.Error("Message de l'interface illisible : " + ex.Message); return; }
-                    if ((string)msg["type"] == "ready")
+                    if ((string)msg["type"] == ToHost.Ready)
                     {
                         _uiReady = true;
                         _package.Log.Info("Interface du panneau prête.");
@@ -175,12 +175,12 @@ namespace ClaudeVS.Chat
                         _web = new WebView2();
                         Content = _web;
                         _initialized = false;
-                        Post(new JObject { ["type"] = "notice", ["text"] = notice }); // livré après le prochain « ready »
+                        Post(new JObject { ["type"] = FromHost.Notice, ["text"] = notice }); // livré après le prochain « ready »
                         RunOnUi(InitAsync, "webview");
                         break;
                     case CoreWebView2ProcessFailedKind.RenderProcessExited:
                         _uiReady = false;
-                        Post(new JObject { ["type"] = "notice", ["text"] = notice });
+                        Post(new JObject { ["type"] = FromHost.Notice, ["text"] = notice });
                         _web.CoreWebView2?.Reload();
                         break;
                     case CoreWebView2ProcessFailedKind.RenderProcessUnresponsive:
@@ -225,7 +225,7 @@ namespace ClaudeVS.Chat
             ThreadHelper.ThrowIfNotOnUIThread();
             if (_disposed) return;
             _web.Focus();
-            Post(new JObject { ["type"] = "focus" });
+            Post(new JObject { ["type"] = FromHost.Focus });
         }
 
         /// <summary>Envoie un message à l'interface (thread quelconque). Sans effet après Dispose ou si WebView2 n'a pas pu démarrer.</summary>
@@ -259,7 +259,7 @@ namespace ClaudeVS.Chat
             var bg = VSColorTheme.GetThemedColor(EnvironmentColors.ToolWindowBackgroundColorKey);
             Post(new JObject
             {
-                ["type"] = "theme",
+                ["type"] = FromHost.Theme,
                 ["dark"] = (bg.R * 299 + bg.G * 587 + bg.B * 114) / 1000 < 128,
                 ["vars"] = new JObject
                 {

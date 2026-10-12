@@ -36,7 +36,7 @@ namespace ClaudeVS.Chat
         public void RepostPending()
         {
             foreach (var kv in _pendingPermissions)
-                _post(new JObject { ["type"] = "cli", ["msg"] = new JObject { ["type"] = "control_request", ["request_id"] = kv.Key, ["request"] = kv.Value } });
+                _post(new JObject { ["type"] = FromHost.Cli, ["msg"] = new JObject { ["type"] = "control_request", ["request_id"] = kv.Key, ["request"] = kv.Value } });
         }
 
         public void Resolve(string requestId, JObject response)
@@ -52,7 +52,7 @@ namespace ClaudeVS.Chat
             if (!_sendResponse(requestId, response)) return;
             _pendingPermissions.Remove(requestId);
             _ide.CloseDiff(DiffTab(requestId));
-            _post(new JObject { ["type"] = "permissionResolved", ["requestId"] = requestId, ["behavior"] = response["behavior"] });
+            _post(new JObject { ["type"] = FromHost.PermissionResolved, ["requestId"] = requestId, ["behavior"] = response["behavior"] });
         }
 
         /// <summary>Demande abandonnée (processus arrêté, tour terminé, annulation du CLI) : ferme le diff et expire la carte.</summary>
@@ -61,7 +61,7 @@ namespace ClaudeVS.Chat
             ThreadHelper.ThrowIfNotOnUIThread();
             if (!_pendingPermissions.Remove(requestId)) return;
             _ide.CloseDiff(DiffTab(requestId));
-            _post(new JObject { ["type"] = "permissionResolved", ["requestId"] = requestId, ["behavior"] = "cancelled" });
+            _post(new JObject { ["type"] = FromHost.PermissionResolved, ["requestId"] = requestId, ["behavior"] = "cancelled" });
         }
 
         public void ClearAll()
@@ -95,7 +95,7 @@ namespace ClaudeVS.Chat
                 catch (Exception ex)
                 {
                     _ide.Log.Info($"Diff indisponible pour {path} : {ex.Message}");
-                    _post(new JObject { ["type"] = "notice", ["text"] = $"Diff indisponible pour {Path.GetFileName(path)} : {ex.Message} — répondez depuis la carte du chat." });
+                    _post(new JObject { ["type"] = FromHost.Notice, ["text"] = $"Diff indisponible pour {Path.GetFileName(path)} : {ex.Message} — répondez depuis la carte du chat." });
                     return;
                 }
                 if (!_pendingPermissions.ContainsKey(requestId)) return; // décidé ou abandonné pendant la lecture
