@@ -51,6 +51,10 @@ button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.icon { padding: 2px 7px; background: transparent; border-color: transparent; }
 button.icon:hover { border-color: var(--input-border); }
+/* Icônes dessinées en SVG : traits calés sur les pixels, indépendants des polices (le « ＋ » pleine chasse était déformé) */
+svg.glyph { display: block; fill: currentColor; shape-rendering: crispEdges; }
+/* Même hauteur pour les boutons de la barre, qu'ils contiennent un emoji ou une icône SVG */
+#toolbar button.icon { display: inline-flex; align-items: center; justify-content: center; height: 26px; }
 select {
   background: var(--input-bg);
   border: 1px solid var(--input-border);
