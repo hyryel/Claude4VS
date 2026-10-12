@@ -19,9 +19,29 @@ export function resizeInput() {
   inputEl.style.height = Math.min(inputEl.scrollHeight + 2, window.innerHeight * 0.4) + 'px';
 }
 
+// Historique des demandes rappelées par ↑/↓ : en mémoire seulement, rien sur disque.
+// historyPos === history.length désigne le brouillon en cours.
+const history = [];
+let historyPos = 0;
+let draft = '';
+
+function recall(dir) {
+  const next = historyPos + dir;
+  if (next < 0 || next > history.length) return false;
+  if (historyPos === history.length) draft = inputEl.value;
+  historyPos = next;
+  inputEl.value = next === history.length ? draft : history[next];
+  inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
+  resizeInput();
+  return true;
+}
+
 export function send() {
   const text = inputEl.value.trim();
   if (!text && !state.images.length) return;
+  if (text && text !== history[history.length - 1]) history.push(text);
+  historyPos = history.length;
+  draft = '';
   const ctx = !selectionEl.hidden && !selectionEl.classList.contains('off') ? selectionEl.textContent : null;
   addOwnMessage(text, ctx, state.images);
   state.stick = true; scroll();
@@ -234,6 +254,14 @@ export function wireComposer() {
       if (e.key === 'ArrowUp') { state.popupIndex = (state.popupIndex - 1 + items.length) % items.length; showPopup(items); e.preventDefault(); return; }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { pick(state.popupIndex); e.preventDefault(); return; }
       if (e.key === 'Escape') { hidePopup(); e.preventDefault(); return; }
+    }
+    // ↑ seulement depuis la première ligne, ↓ seulement depuis la dernière : la saisie multiligne reste navigable
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey
+        && inputEl.selectionStart === inputEl.selectionEnd) {
+      const up = e.key === 'ArrowUp';
+      const edge = up ? !inputEl.value.slice(0, inputEl.selectionStart).includes('\n')
+                      : !inputEl.value.slice(inputEl.selectionEnd).includes('\n');
+      if (edge && recall(up ? -1 : 1)) { e.preventDefault(); return; }
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     else if (e.key === 'Escape') interrupt();
