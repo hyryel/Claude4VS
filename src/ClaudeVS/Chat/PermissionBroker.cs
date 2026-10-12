@@ -67,20 +67,27 @@ namespace ClaudeVS.Chat
             _post(new JObject { ["type"] = FromHost.PermissionResolved, ["requestId"] = requestId, ["behavior"] = response["behavior"] });
         }
 
-        /// <summary>Demande abandonnée (processus arrêté, tour terminé, annulation du CLI) : ferme le diff et expire la carte.</summary>
-        public void Cancel(string requestId)
+        /// <summary>
+        /// Demande abandonnée sans réponse : ferme le diff et marque la carte. <paramref name="reason"/> en donne la cause
+        /// à l'interface : « cli » (control_cancel_request du CLI) ou « stopped » (processus arrêté).
+        /// </summary>
+        public void Cancel(string requestId, string reason)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (!_pendingPermissions.Remove(requestId)) return;
             _diffBases.Remove(requestId);
             _ide.CloseDiff(DiffTab(requestId));
-            _post(new JObject { ["type"] = FromHost.PermissionResolved, ["requestId"] = requestId, ["behavior"] = "cancelled" });
+            _post(new JObject
+            {
+                ["type"] = FromHost.PermissionResolved, ["requestId"] = requestId, ["behavior"] = "cancelled", ["reason"] = reason,
+            });
         }
 
+        /// <summary>Processus arrêté (nouvelle conversation, reprise, plantage) : toutes les demandes sont abandonnées.</summary>
         public void ClearAll()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            foreach (var id in _pendingPermissions.Keys.ToList()) Cancel(id);
+            foreach (var id in _pendingPermissions.Keys.ToList()) Cancel(id, "stopped");
         }
 
         public static string DiffTab(string requestId) => "claude-perm-" + requestId;
