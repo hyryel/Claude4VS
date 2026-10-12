@@ -108,7 +108,7 @@ namespace ClaudeVS.Chat
                 catch (Exception ex)
                 {
                     _ide.Log.Info($"Diff indisponible pour {path} : {ex.Message}");
-                    _post(new JObject { ["type"] = FromHost.Notice, ["text"] = $"Diff indisponible pour {Path.GetFileName(path)} : {ex.Message} — répondez depuis la carte du chat." });
+                    _post(new JObject { ["type"] = FromHost.Banner, ["sticky"] = true, ["text"] = $"Diff indisponible pour {Path.GetFileName(path)} : {ex.Message}\nRépondez depuis la carte du chat." });
                     return;
                 }
                 if (!_pendingPermissions.ContainsKey(requestId)) return; // décidé ou abandonné pendant la lecture
