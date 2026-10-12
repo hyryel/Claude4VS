@@ -28,6 +28,9 @@ namespace ClaudeVS.Chat
         Task<(bool? accepted, string? text)> ShowDiffAsync(string path, string proposed, string tab);
 
         void CloseDiff(string tab);
+
+        /// <summary>Contenu actuel, éventuellement retouché, du diff ouvert sur cet onglet ; null s'il n'y en a pas. Thread UI.</summary>
+        string? CurrentDiffText(string tab);
     }
 
     /// <summary>Implémentation sur le package : solution courante, ouverture de documents, mise en forme, diff.</summary>
@@ -66,5 +69,7 @@ namespace ClaudeVS.Chat
         }
 
         public void CloseDiff(string tab) => DiffManager.GetInstance(_package).Close(tab);
+
+        public string? CurrentDiffText(string tab) => DiffManager.GetInstance(_package).CurrentText(tab);
     }
 }

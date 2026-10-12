@@ -20,6 +20,7 @@ namespace ClaudeVS.Chat
         private readonly Func<string, JObject, bool> _sendResponse;   // faux si l'envoi au CLI a échoué
         private readonly Action<Func<Task>, string> _runOnUi;
         private readonly Dictionary<string, JObject> _pendingPermissions = new Dictionary<string, JObject>();
+        private readonly Dictionary<string, (string path, string original, string proposed)> _diffBases = new Dictionary<string, (string, string, string)>();
 
         public PermissionBroker(IIdeContext ide, Action<JObject> post, Func<string, JObject, bool> sendResponse, Action<Func<Task>, string> runOnUi)
         {
@@ -48,10 +49,20 @@ namespace ClaudeVS.Chat
             _ide.Log.Info($"→ permission {requestId} : {response["behavior"]}");
             response["toolUseID"] = request["tool_use_id"];
             if ((string?)response["behavior"] == "allow" && response["updatedInput"] == null)
-                response["updatedInput"] = request["input"];
+            {
+                // Accepté depuis la carte du chat alors que le diff est ouvert : on garde les retouches faites dans le diff
+                if (_diffBases.TryGetValue(requestId, out var b) && request["input"] is JObject input)
+                {
+                    var edited = _ide.CurrentDiffText(DiffTab(requestId));
+                    response["updatedInput"] = EditPreview.BuildUpdatedInput((string?)request["tool_name"], input, b.path, b.original, b.proposed, edited);
+                }
+                else
+                    response["updatedInput"] = request["input"];
+            }
             // En cas d'échec d'envoi, la demande est encore en attente : HandleWriteFailure la marque « cancelled » avec les autres
             if (!_sendResponse(requestId, response)) return;
             _pendingPermissions.Remove(requestId);
+            _diffBases.Remove(requestId);
             _ide.CloseDiff(DiffTab(requestId));
             _post(new JObject { ["type"] = FromHost.PermissionResolved, ["requestId"] = requestId, ["behavior"] = response["behavior"] });
         }
@@ -61,6 +72,7 @@ namespace ClaudeVS.Chat
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (!_pendingPermissions.Remove(requestId)) return;
+            _diffBases.Remove(requestId);
             _ide.CloseDiff(DiffTab(requestId));
             _post(new JObject { ["type"] = FromHost.PermissionResolved, ["requestId"] = requestId, ["behavior"] = "cancelled" });
         }
@@ -101,6 +113,7 @@ namespace ClaudeVS.Chat
                 }
                 if (!_pendingPermissions.ContainsKey(requestId)) return; // décidé ou abandonné pendant la lecture
 
+                _diffBases[requestId] = (path, original, proposed);
                 var (accepted, text) = await _ide.ShowDiffAsync(path, proposed, DiffTab(requestId));
                 if (accepted == null || !_pendingPermissions.ContainsKey(requestId)) return; // onglet fermé ou décidé dans le chat
 

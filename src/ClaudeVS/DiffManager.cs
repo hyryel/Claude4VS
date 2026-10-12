@@ -135,6 +135,13 @@ namespace ClaudeVS
             return File.ReadAllText(path);
         }
 
+        /// <summary>Contenu actuel (éventuellement retouché) de la proposition en cours sur cet onglet, sinon null.</summary>
+        public string CurrentText(string tabName)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return tabName != null && _pending.TryGetValue(tabName, out var p) ? ReadBuffer(p.RightPath) : null;
+        }
+
         public void Close(string tabName)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -167,6 +174,8 @@ namespace ClaudeVS
             private IVsInfoBarUIElement _infoBar;
             private uint _infoBarCookie;
             private uint _frameCookie;
+
+            public string RightPath => _rightPath;
 
             public TaskCompletionSource<bool?> Decision { get; } =
                 new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
