@@ -49,7 +49,7 @@ Autres ajustements : contraste des textes secondaires (gris 70 %), icône « + �
   Start-Process "C:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\devenv.exe" -ArgumentList '/rootsuffix Exp "F:\repositories\perso\Claude4VS\src\ClaudeVS\ClaudeVS.slnx"'
   ```
 - Client DevTools : `%LOCALAPPDATA%\Temp\claudevs-cdp\cdp.ps1` (`-Expression`, `-Console`, `-Screenshot`, `-Method Page.crash`).
-- **Fichiers web** : copie à chaud dans `%LOCALAPPDATA%\Microsoft\VisualStudio\18.0_4940ae17Exp\Extensions\nicolas.pernot\ClaudeVS (POC)\0.1.0\Chat\web\`, puis `location.reload()`.
+- **Fichiers web** : copie à chaud dans `%LOCALAPPDATA%\Microsoft\VisualStudio\18.0_4940ae17Exp\Extensions\nicolas.pernot\ClaudeVS\0.1.0\Chat\web\`, puis `location.reload()`.
 - **C#** : fermer l'instance expérimentale (la DLL est verrouillée), compiler (le build déploie), relancer.
 
 ## 5. Évolutions demandées, à faire après les tests
